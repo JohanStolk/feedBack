@@ -23,6 +23,7 @@
     const INSTRUMENTS = {
         guitar: { label: 'Guitar', mode: 'audio' },
         bass: { label: 'Bass', mode: 'audio' },
+        vocals: { label: 'Vocals', mode: 'audio' },
         keys: { label: 'Keys / Piano', mode: 'midi' },
         piano: { label: 'Keys / Piano', mode: 'midi' },
         drums: { label: 'Drums', mode: 'midi' },
@@ -163,7 +164,31 @@
                 try { fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instrument: inst }) }); } catch (_) {}
 
                 host.querySelector('[data-is-cal]').addEventListener('click', () => {
-                    if (hasDetector) {
+                    if (inst === 'vocals') {
+                        // Vocals calibration is handled by the vocal-highway plugin's
+                        // facade. Guard: if the facade is absent (plugin disabled or
+                        // not yet loaded), mark done with a notice and continue.
+                        const vc = window.feedBack && window.feedBack.vocalCalibration;
+                        if (vc && vc.version === 1 && typeof vc.launch === 'function') {
+                            const ov = document.getElementById('input-setup-overlay');
+                            const prevDisplay = ov ? ov.style.display : '';
+                            if (ov) ov.style.display = 'none';
+                            const restore = () => {
+                                const o = document.getElementById('input-setup-overlay');
+                                if (o) o.style.display = prevDisplay;
+                            };
+                            vc.launch({
+                                requester: 'input_setup',
+                                onDone: (_result) => { restore(); advance(inst, true); },
+                                onCancel: () => { restore(); /* stay on panel; user can skip or retry */ },
+                            });
+                        } else {
+                            // ponytail: vocal-highway not loaded — mark done so wizard doesn't hang
+                            const body = host.querySelector('[data-is-body]');
+                            if (body) body.innerHTML = '<p class="text-sm text-fb-textDim">Vocal calibration will be available once the Vocal Highway plugin is enabled. Continuing…</p>';
+                            setTimeout(() => advance(inst, true), 1800);
+                        }
+                    } else if (hasDetector) {
                         // Hide our own full-screen overlay while note_detect's
                         // Calibration Wizard runs on top. That wizard goes
                         // transparent (pointer-events:none) when it minimizes to

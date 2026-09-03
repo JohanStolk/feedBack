@@ -33,7 +33,7 @@ BUNDLED_CONTENT = REPO_ROOT / "data" / "progression"
 def test_bundled_content_loads_clean():
     content, warnings = load_content(BUNDLED_CONTENT)
     assert warnings == []
-    assert set(content["paths"]) == {"guitar", "bass", "drums", "keys"}
+    assert set(content["paths"]) == {"guitar", "bass", "drums", "keys", "vocals"}
     assert content["challenge_index"]
     assert content["quests"]["daily"]["count"] == 3
     assert content["quests"]["weekly"]["count"] == 2
