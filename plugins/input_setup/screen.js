@@ -200,7 +200,12 @@
                             calBtn.disabled = true;
                             const body = host.querySelector('[data-is-body]');
                             if (body) body.innerHTML = '<p class="text-sm text-fb-textDim">Vocal calibration will be available once the Vocal Highway plugin is enabled. Continuing…</p>';
-                            setTimeout(() => advance(inst, true), 1800);
+                            // Store timer id so advance() (via _activeCleanup) can cancel it
+                            // if the user hits Skip before the 1800ms fires — prevents the
+                            // stale timer from double-advancing the wizard and dropping the
+                            // next instrument from both completed and skipped.
+                            const _timerId = setTimeout(() => advance(inst, true), 1800);
+                            _activeCleanup = () => clearTimeout(_timerId);
                         }
                     } else if (hasDetector) {
                         // Hide our own full-screen overlay while note_detect's

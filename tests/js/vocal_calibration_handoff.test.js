@@ -96,6 +96,8 @@ function loadScreenJs(windowOverrides) {
     const timeoutImpl = (windowOverrides && windowOverrides.setTimeout)
         || function(fn, _ms) { fn(); };
 
+    const clearTimeoutImpl = (windowOverrides && windowOverrides.clearTimeout) || function(_id) {};
+
     const ctx = {
         window: Object.assign({
             feedBack: {
@@ -117,6 +119,7 @@ function loadScreenJs(windowOverrides) {
         })(),
         fetch() { return Promise.resolve({ ok: true }); },
         setTimeout: timeoutImpl,
+        clearTimeout: clearTimeoutImpl,
         console,
     };
     vm.createContext(ctx);
@@ -235,6 +238,62 @@ test('double-click on fallback Calibrate does not double-advance the wizard', as
     const result = await mountPromise;
     assert.equal(result.completed.length, 1);
     assert.equal(result.completed[0], 'vocals');
+});
+
+// ── 3c. Calibrate-then-Skip stale-timer bug (Creed finding) ──────────────────
+// Failure input: vocalCalibration absent, ['vocals'] queue, user clicks
+//   Calibrate (queues 1800ms timer) then clicks Skip before timer fires.
+// Without fix: Skip calls advance('vocals', false) → wizard resolves, then
+//   the stale timer fires advance('vocals', true) → completed array mutated
+//   AFTER promise settled → result.completed gains 'vocals' retroactively;
+//   with a 2-instrument queue, idx is also double-incremented, dropping the
+//   next instrument from both lists.
+// Fix: _activeCleanup = () => clearTimeout(_timerId) — advance() drains it.
+
+test('Skip before fallback timer fires cancels the timer — no stale advance', async () => {
+    const timers = []; // collect scheduled timers without auto-firing
+    const cancelled = [];
+    const w = loadScreenJs({
+        feedBack: { capabilities: null, midiInput: null, vocalCalibration: undefined },
+        setTimeout(fn, _ms) { const id = timers.length; timers.push(fn); return id; },
+        clearTimeout(id) { cancelled.push(id); timers[id] = null; },
+    });
+
+    const hostEl = makeEl('div', {});
+    const mountPromise = w.feedBackInputSetup.mount(hostEl, { instruments: ['vocals'] });
+    await new Promise((r) => setImmediate(r));
+
+    const calBtn = hostEl._namedChildren && hostEl._namedChildren['is-cal'];
+    assert.ok(calBtn, 'Calibrate button must exist');
+
+    // Step 1: click Calibrate — queues the 1800ms timer
+    calBtn.click();
+    assert.equal(timers.length, 1, 'one timer must be queued after Calibrate');
+
+    // Step 2: click Skip BEFORE the timer fires
+    const skipBtn = hostEl._namedChildren && hostEl._namedChildren['is-skip'];
+    assert.ok(skipBtn, 'Skip button must exist');
+    skipBtn.click();
+
+    // The promise resolves via Skip's advance('vocals', false)
+    const result = await mountPromise;
+
+    // vocals must be in skipped, NOT completed
+    assert.equal(result.skipped.length, 1, 'vocals must be skipped');
+    assert.equal(result.skipped[0], 'vocals');
+    assert.equal(result.completed.length, 0, 'completed must be empty after skip');
+
+    // The timer must have been cancelled — input that FAILS without the fix:
+    // if clearTimeout was NOT called, firing the stale timer now would mutate
+    // the completed array retrospectively.
+    assert.ok(cancelled.length > 0, 'clearTimeout must be called — stale timer must be cancelled');
+
+    // Verify: firing the (now-cancelled) timer is a no-op (timers[0] nulled out)
+    if (timers[0] !== null) {
+        // If the fix is missing, this would push 'vocals' into completed
+        timers[0]();
+        assert.equal(result.completed.length, 0, 'stale timer must not mutate completed after skip');
+    }
 });
 
 // ── 4. vocalCalibration facade present → launch() called, not noteDetect ──────
