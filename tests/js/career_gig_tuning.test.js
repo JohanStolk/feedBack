@@ -307,9 +307,12 @@ describe('career-gig-tuning bookGig', () => {
     });
 
     test('F2: closeBook() invalidates in-flight request — overlay stays closed', async () => {
-        // Failure input: user opens poster, a booking request is in flight (pending),
-        // user closes the poster via closeBook. Without _ppBookGen increment in closeBook,
-        // the pending response resolves, repopulates _ppGigProposal, and reopens the overlay.
+        // Failure input: a booking request is in flight (pending fetch), then the user
+        // closes the poster via the REAL closeBook(). Without ++_ppBookGen in closeBook,
+        // the pending response resolves and repopulates _ppGigProposal.
+        //
+        // Mutation proof: delete `++_ppBookGen` from closeBook() → test goes RED
+        //                 (proposal is non-null, assert fails). Restore → GREEN.
         const ctx = makeBookCtx();
         let resolvePending;
         ctx.fetch = () => new Promise(r => { resolvePending = r; });
@@ -318,17 +321,15 @@ describe('career-gig-tuning bookGig', () => {
         vm.runInContext(`window.__careerPassportTest.setTuningPref('any');`, ctx);
         const pending = vm.runInContext(`window.__careerPassportTest.bookGig('rock');`, ctx);
 
-        // User closes the poster — must invalidate the in-flight request
-        // closeBook() is not in the test seam; simulate by incrementing gen directly
-        // (equivalent to what closeBook does with ++_ppBookGen)
-        vm.runInContext(`window.__careerPassportTest.setBookGen(window.__careerPassportTest.getBookGen() + 1);`, ctx);
+        // User closes the poster — call the REAL closeBook() via the test seam
+        vm.runInContext(`window.__careerPassportTest.closeBook();`, ctx);
 
-        // Now resolve the pending request with a valid payload
+        // Now resolve the pending fetch with a valid payload
         resolvePending({ ok: true, status: 200, json: async () => ({ songs: [{ filename: 'a.sloppak', tuning_name: 'E Standard' }], tuning_pref: 'any' }) });
         await pending;
 
-        // Proposal must remain null — the response was discarded
+        // Proposal must remain null — closeBook() incremented _ppBookGen so response was discarded
         const proposal = vm.runInContext(`window.__careerPassportTest.getProposal()`, ctx);
-        assert.equal(proposal, null, 'closeBook-invalidated request must not repopulate _ppGigProposal');
+        assert.equal(proposal, null, 'closeBook() must invalidate in-flight request via ++_ppBookGen');
     });
 });

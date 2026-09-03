@@ -1721,7 +1721,7 @@
         getBookGen() { return _ppBookGen; },
         setBookGen(g) { _ppBookGen = g; },
         getProposal() { return _ppGigProposal; },
-        bookGig,
+        bookGig, closeBook,
     };
 
     if (document.readyState === 'loading') {
