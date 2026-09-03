@@ -199,6 +199,44 @@ test('renderAudioPanel for vocals falls back gracefully when vocalCalibration is
     assert.equal(result.completed[0], 'vocals', 'completed[0] must be vocals');
 });
 
+// ── 3b. double-click guard: second click must NOT queue a second advance ───────
+// Failure input: vocalCalibration absent, instruments ['vocals','guitar'],
+//   two clicks on Calibrate before the 1800ms timer fires.
+// Without guard: two timers queued → second fires on guitar panel → idx
+//   increments past guitar → finish() prematurely → guitar silently dropped.
+
+test('double-click on fallback Calibrate does not double-advance the wizard', async () => {
+    const timers = [];
+    const w = loadScreenJs({
+        feedBack: { capabilities: null, midiInput: null, vocalCalibration: undefined },
+        setTimeout(fn, _ms) { timers.push(fn); },
+    });
+
+    // Two-instrument queue: vocals then guitar (guitar has noteDetect absent too,
+    // so it would also auto-advance — but we only care about the vocals panel here).
+    const hostEl = makeEl('div', {});
+    // Mount with ['vocals'] only so we can isolate the guard without needing a
+    // full multi-panel render (guitar panel is MIDI-unrelated complexity).
+    // The guard must prevent a second timer from being queued at all.
+    const mountPromise = w.feedBackInputSetup.mount(hostEl, { instruments: ['vocals'] });
+    await new Promise((r) => setImmediate(r));
+
+    const calBtn = hostEl._namedChildren && hostEl._namedChildren['is-cal'];
+    assert.ok(calBtn, 'button must exist');
+
+    // Two rapid clicks.
+    calBtn.click();
+    calBtn.click();
+
+    // Only ONE timer must have been queued (button disabled after first click).
+    assert.equal(timers.length, 1, 'double-click must only queue one advance timer — input: two clicks before timer fires');
+
+    timers[0]();
+    const result = await mountPromise;
+    assert.equal(result.completed.length, 1);
+    assert.equal(result.completed[0], 'vocals');
+});
+
 // ── 4. vocalCalibration facade present → launch() called, not noteDetect ──────
 
 test('renderAudioPanel for vocals calls vocalCalibration.launch when facade present', async () => {
@@ -240,4 +278,67 @@ test('renderAudioPanel for vocals calls vocalCalibration.launch when facade pres
     const result = await mountPromise;
     assert.equal(result.completed.length, 1);
     assert.equal(result.completed[0], 'vocals');
+});
+
+// ── 5. _inputSetupRelaunch fallback includes 'vocals' (F2) ───────────────────
+// Failure input: window._inputSetupRelaunch called when fetch('/api/progression')
+//   rejects — the fallback instrument list must include 'vocals' or Settings
+//   re-calibration silently skips it.
+
+test('_inputSetupRelaunch fallback list includes vocals when API call fails', () => {
+    let launchedWith = null;
+    const w = loadScreenJs({
+        feedBack: { capabilities: null, midiInput: null, vocalCalibration: undefined },
+        // Reject the fetch to trigger the fallback path.
+        fetch() { return Promise.reject(new Error('network error')); },
+    });
+    // Patch launch() to capture the instruments without spinning up a full overlay.
+    w.feedBackInputSetup._captureNextLaunch = (list) => { launchedWith = list; };
+    // We can't easily intercept the internal `launch()` from outside the IIFE.
+    // Instead, verify the status API: after _inputSetupRelaunch is awaited,
+    // the fallback list is ['guitar','bass','vocals','keys','drums'] by reading
+    // the source directly (static code check via the status call on each).
+    // The definitive check: call status() for 'vocals' — it must be in INSTRUMENTS.
+    const status = w.feedBackInputSetup.status(['vocals', 'guitar', 'bass', 'keys', 'drums']);
+    assert.ok('vocals' in status, 'vocals must be in the status map — confirming INSTRUMENTS includes it');
+    // Structural read: _inputSetupRelaunch is a closure we cannot easily inspect,
+    // but the bug was the string literal ['guitar','bass','keys','drums'].
+    // Verify by reading the source file for the fixed literal.
+    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    assert.ok(
+        src.includes("'guitar', 'bass', 'vocals', 'keys', 'drums'") ||
+        src.includes("'guitar','bass','vocals','keys','drums'"),
+        "fallback list must include 'vocals' — input: /api/progression fetch failure"
+    );
+});
+
+// ── 6. button label keys off vocalCalibration for vocals (F3) ─────────────────
+// Failure input: vocalCalibration present but noteDetect absent.
+//   Without fix: label reads 'Continue' (keyed off hasDetector=false).
+//   With fix: label reads 'Calibrate' (keyed off hasVocalCal=true).
+
+test('Calibrate button shows Calibrate when vocalCalibration present and noteDetect absent', async () => {
+    const facade = { version: 1, launch(_args) {} };
+    const w = loadScreenJs({
+        feedBack: { capabilities: null, midiInput: null, vocalCalibration: facade },
+        // noteDetect is absent — without F3 fix, label would be 'Continue'
+    });
+    // noteDetect deliberately not set
+
+    const hostEl = makeEl('div', {});
+    w.feedBackInputSetup.mount(hostEl, { instruments: ['vocals'] });
+    await new Promise((r) => setImmediate(r));
+
+    // The shell sets innerHTML; we check the captured HTML for the button label.
+    // The innerHTML of hostEl reflects the last shell() call.
+    const html = hostEl.innerHTML || '';
+    assert.ok(
+        html.includes('Calibrate'),
+        'button must read Calibrate when vocalCalibration present (even if noteDetect absent) — input: facade present, noteDetect absent'
+    );
+    assert.equal(
+        html.includes('>Continue<'),
+        false,
+        'must NOT read Continue when vocalCalibration is present'
+    );
 });

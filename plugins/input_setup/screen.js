@@ -134,16 +134,25 @@
                 const opts2 = sources.map((s) =>
                     '<option value="' + esc(s.logicalSourceKey || s.sourceId || '') + '"' + (s.selected ? ' selected' : '') + '>' + esc(s.label || 'Input') + '</option>').join('');
                 const hasDetector = !!(window.noteDetect && typeof window.noteDetect.launchCalibration === 'function');
+                const hasVocalCal = inst === 'vocals' && !!(window.feedBack && window.feedBack.vocalCalibration &&
+                    window.feedBack.vocalCalibration.version === 1 &&
+                    typeof window.feedBack.vocalCalibration.launch === 'function');
+                // For vocals: "Calibrate" iff vocal-cal facade present; "Continue" otherwise.
+                // For guitar/bass: "Calibrate" iff noteDetect present; "Continue" otherwise.
+                const canCalibrate = inst === 'vocals' ? hasVocalCal : hasDetector;
+                const notLoadedNotice = inst === 'vocals'
+                    ? (hasVocalCal ? '' : '<p class="text-xs text-fb-textDim mt-3">Vocal calibration isn’t available yet — you can set it up later from the player.</p>')
+                    : (hasDetector ? '' : '<p class="text-xs text-fb-textDim mt-3">The note detector isn’t loaded here — you can calibrate later from the player.</p>');
                 const body =
                     '<p class="text-sm text-fb-textDim">Pick your audio input, then run the calibration to set levels, channel and latency.</p>' +
                     (sources.length
                         ? '<label class="block text-xs uppercase tracking-wider text-fb-textDim mt-3 mb-1">Audio input</label>' +
                           '<select data-is-audio class="w-full bg-gray-800/50 border border-gray-700 rounded-md px-2 py-1.5 text-sm text-fb-text outline-none">' + opts2 + '</select>'
                         : '<p class="text-sm text-fb-accent mt-2">No audio input detected yet — plug in your interface, or skip and set this up later.</p>') +
-                    (hasDetector ? '' : '<p class="text-xs text-fb-textDim mt-3">The note detector isn’t loaded here — you can calibrate later from the player.</p>');
+                    notLoadedNotice;
                 const foot =
                     '<button type="button" data-is-cal class="bg-fb-primary hover:bg-fb-primaryHi text-white px-5 py-2 rounded-md font-medium">' +
-                    (hasDetector ? 'Calibrate' : 'Continue') + '</button>';
+                    (canCalibrate ? 'Calibrate' : 'Continue') + '</button>';
                 shell(inst, body, foot);
 
                 const sel = host.querySelector('[data-is-audio]');
@@ -163,7 +172,9 @@
                 // Tell the tuner tables / note_detect which instrument this is.
                 try { fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instrument: inst }) }); } catch (_) {}
 
-                host.querySelector('[data-is-cal]').addEventListener('click', () => {
+                const calBtn = host.querySelector('[data-is-cal]');
+                let _advancing = false; // double-click guard for the auto-advance fallback
+                calBtn.addEventListener('click', () => {
                     if (inst === 'vocals') {
                         // Vocals calibration is handled by the vocal-highway plugin's
                         // facade. Guard: if the facade is absent (plugin disabled or
@@ -184,6 +195,9 @@
                             });
                         } else {
                             // ponytail: vocal-highway not loaded — mark done so wizard doesn't hang
+                            if (_advancing) return; // double-click guard: one advance per panel
+                            _advancing = true;
+                            calBtn.disabled = true;
                             const body = host.querySelector('[data-is-body]');
                             if (body) body.innerHTML = '<p class="text-sm text-fb-textDim">Vocal calibration will be available once the Vocal Highway plugin is enabled. Continuing…</p>';
                             setTimeout(() => advance(inst, true), 1800);
@@ -377,7 +391,7 @@
 
     // Settings-panel re-entry (settings.html "Set up input devices" button).
     // Re-runs the wizard for the player's selected instrument paths, falling
-    // back to all instruments when progression isn't available.
+    // back to all instruments when progression isn’t available.
     window._inputSetupRelaunch = async function () {
         let instruments = [];
         try {
@@ -388,7 +402,7 @@
                 instruments = paths.map((p) => (typeof p === 'string' ? p : (p && p.id))).filter(Boolean);
             }
         } catch (_) { /* offline — fall back below */ }
-        if (!instruments.length) instruments = ['guitar', 'bass', 'keys', 'drums'];
+        if (!instruments.length) instruments = ['guitar', 'bass', 'vocals', 'keys', 'drums'];
         launch(instruments);
     };
 })();
