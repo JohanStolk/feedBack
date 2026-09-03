@@ -110,9 +110,11 @@ describe('career-gig-tuning interstitial', () => {
         assert.notEqual(get(ctx, 'window.__careerPassportTest.getTuningHold()'), null);
     });
 
-    test('first song does NOT fire interstitial for pref=specific', () => {
+    test('first song does NOT fire interstitial for pref=specific:E Standard', () => {
+        // Failure input: bare 'specific' would pass the old wrong guard `!== 'specific'`
+        // but is impossible in production. Real value is always 'specific:<name>'.
         const ctx = makeCtx();
-        setRun(ctx, 'specific', [{ filename: 'a.sloppak', tuning_name: 'E Standard' }]);
+        setRun(ctx, 'specific:E Standard', [{ filename: 'a.sloppak', tuning_name: 'E Standard' }]);
         callOnLoading(ctx);
         assert.equal(get(ctx, 'window.__careerPassportTest.getTuningHold()'), null);
     });

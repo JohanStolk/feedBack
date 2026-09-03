@@ -1135,9 +1135,13 @@
             });
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                // Tuning filter yielded no songs → revert to 'any' and notify
+                // Tuning filter yielded no songs → revert to 'any', re-render poster, notify
                 _ppGigTuningPref = 'any';
                 lsSet(PP_TUNING_PREF_KEY, 'any');
+                if (_ppGigProposal) {
+                    const overlay = $('pp-overlay');
+                    if (overlay) overlay.innerHTML = gigPosterHTML(_ppGigProposal);
+                }
                 if (window.fbNotify && typeof window.fbNotify.show === 'function') {
                     try { window.fbNotify.show({ title: 'Tuning filter', message: (err && err.detail) || 'No songs match that tuning filter.', icon: '🎸' }); } catch (_) { /* */ }
                 }
@@ -1466,7 +1470,7 @@
         // Interstitial: pause before first song (or when tuning changes) for all
         // non-specific prefs, so the player has time to retune. "specific" is
         // excluded because every song already matches one fixed tuning.
-        const needsInterstitial = pref !== 'specific' && (
+        const needsInterstitial = !pref.startsWith('specific:') && (
             run.idx === 0 || tuningName !== _ppGigLastTuning
         );
         _ppGigLastTuning = tuningName;
