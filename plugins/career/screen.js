@@ -26,6 +26,7 @@
     const PP_SEEN_KEY = 'feedBack-career-badges-seen';
     const PP_INST_KEY = 'feedBack-career-instrument';
     const PP_TAB_KEY = 'feedBack-career-tab';
+    const PP_TUNING_PREF_KEY = 'feedBack-career-tuning-pref';
     const PP_LABELS = { guitar: 'Guitar', bass: 'Bass', keys: 'Keys', drums: 'Drums' };
     const PP_BROCHURE_ART = ['🎸', '🎷', '🎹', '🥁', '🎺', '🎻', '🎤', '🪕'];
 
@@ -43,7 +44,12 @@
     let _ppBootstrapped = false;
     let _ppNotified = {};        // badges chimed this session (slam still pending)
     let _ppGigProposal = null;   // the booking poster's proposal, while open
-    let _ppGigRun = null;        // {songs, venue_id, genre, genre_key, instrument, idx} mid-set
+    let _ppGigRun = null;        // {songs, venue_id, genre, genre_key, instrument, tuning_pref, idx} mid-set
+    let _ppGigTuningPref = 'any'; // loaded from localStorage in boot()
+    let _ppGigTuningNames = [];  // cached distinct tuning names for the specific picker
+    let _ppGigTuningHold = null; // holdAutoplay release fn — non-null = interstitial active
+    let _ppGigLastTuning = null; // tuning_name of the current gig song (for change detection)
+    let _ppBookGen = 0;          // generation counter — stale responses are discarded
 
     function $(id) { return document.getElementById(id); }
 
@@ -774,6 +780,7 @@
     function closeBook() {
         _ppBook = null;
         _ppGigProposal = null;   // a dismissed poster is a dismissed booking
+        ++_ppBookGen;             // invalidate any in-flight bookGig request
         const overlay = $('pp-overlay');
         if (overlay) { overlay.classList.add('hidden'); overlay.innerHTML = ''; }
         if (_ppReturnFocus && typeof _ppReturnFocus.focus === 'function' &&
@@ -1085,13 +1092,25 @@
 
     function gigPosterHTML(prop) {
         const bill = prop.songs.map((s, i) =>
-            `<div class="pp-poster-line"><span>${i + 1}.</span> ${esc(s.title)}${s.artist ? ` <em>${esc(s.artist)}</em>` : ''}</div>`).join('');
+            `<div class="pp-poster-line"><span>${i + 1}.</span> ${esc(s.title)}${s.artist ? ` <em>${esc(s.artist)}</em>` : ''}${s.tuning_name ? ` <small class="pp-poster-tuning-chip">${esc(s.tuning_name)}</small>` : ''}</div>`).join('');
+        const PREF_LABELS = { any: 'Any', standard: 'Standard', drop: 'Drop', specific: 'Specific…' };
+        const isSpecific = _ppGigTuningPref.startsWith('specific:');
+        const curPill = isSpecific ? 'specific' : _ppGigTuningPref;
+        const pills = Object.keys(PREF_LABELS).map((p) =>
+            `<button data-pp-tuning="${esc(p)}" class="career-btn career-btn-ghost pp-tuning-pill${curPill === p ? ' pp-tuning-pill-on' : ''}">${PREF_LABELS[p]}</button>`
+        ).join('');
+        const selVal = isSpecific ? _ppGigTuningPref.slice('specific:'.length) : '';
+        const selOpts = _ppGigTuningNames.length
+            ? `<option value="">Choose tuning…</option>${_ppGigTuningNames.map((n) => `<option value="${esc(n)}"${n === selVal ? ' selected' : ''}>${esc(n)}</option>`).join('')}`
+            : `<option value="">Loading…</option>`;
+        const selHidden = isSpecific ? '' : ' hidden';
         return `<div class="pp-book-wrap" data-pp-close-bg="1" role="dialog" aria-modal="true" aria-label="Gig poster">
             <div class="pp-poster">
                 <div class="pp-poster-venue">${esc(prop.venue_name || 'The stage')}</div>
                 <div class="pp-poster-presents">presents</div>
                 <div class="pp-poster-title">${esc(prop.genre.toUpperCase())} NIGHT</div>
                 <div class="pp-poster-inst">${esc(ppLabel(prop.instrument))} · tonight</div>
+                <div class="pp-tuning-row">${pills}<select data-pp-tuning-select class="pp-tuning-select${selHidden}">${selOpts}</select></div>
                 <div class="pp-poster-bill">${bill}</div>
                 <div class="pp-poster-actions">
                     <button class="career-btn career-btn-primary" data-pp-gig-play="1">Play the gig</button>
@@ -1110,21 +1129,64 @@
         const p = (((_pp.instruments || {})[inst] || {}).passports || [])
             .find((x) => x.genre_key === gkey);
         if (!p) return;
+        const gen = ++_ppBookGen; // F1: capture generation before await — stale responses discarded
         try {
             const res = await fetch(`${API}/gigs/propose`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ instrument: inst, genre: p.genre }),
+                body: JSON.stringify({ instrument: inst, genre: p.genre, tuning_pref: _ppGigTuningPref }),
             });
-            if (!res.ok) return;
+            if (gen !== _ppBookGen) return; // stale response — a newer request supersedes this one
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                if (gen !== _ppBookGen) return; // stale — superseded while awaiting error json()
+                if (res.status === 404) {
+                    // No-match 404: revert tuning pref to 'any', re-render poster to match
+                    _ppGigTuningPref = 'any';
+                    lsSet(PP_TUNING_PREF_KEY, 'any');
+                    if (_ppGigProposal) {
+                        const overlay = $('pp-overlay');
+                        if (overlay) overlay.innerHTML = gigPosterHTML(_ppGigProposal);
+                    }
+                }
+                // All errors: notify (404 has a tuning-specific message; others are generic)
+                if (window.fbNotify && typeof window.fbNotify.show === 'function') {
+                    const msg = res.status === 404
+                        ? (err && err.detail) || 'No songs match that tuning filter.'
+                        : 'Could not book gig — please try again.';
+                    try { window.fbNotify.show({ title: 'Gig booking', message: msg, icon: '🎸' }); } catch (_) { /* */ }
+                }
+                return;
+            }
             _ppGigProposal = await res.json();
         } catch (_) { return; }
+        if (gen !== _ppBookGen) return; // stale — superseded while awaiting json()
         const overlay = $('pp-overlay');
         if (!overlay) return;
         _ppBook = null; // the poster replaces the book in the overlay
         overlay.innerHTML = gigPosterHTML(_ppGigProposal);
         overlay.classList.remove('hidden');
         sfx('page');
+    }
+
+    async function _openSpecificTuningPicker() {
+        const overlay = $('pp-overlay');
+        if (!overlay || !_ppGigProposal) return;
+        if (_ppGigTuningNames.length) {
+            const sel = overlay.querySelector('[data-pp-tuning-select]');
+            if (sel) sel.classList.remove('hidden');
+            return;
+        }
+        try {
+            const res = await fetch(`${API}/gigs/tunings?genre=${encodeURIComponent(_ppGigProposal.genre)}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            _ppGigTuningNames = Array.isArray(data.tunings) ? data.tunings : [];
+        } catch (_) { return; }
+        // Re-render with populated options
+        overlay.innerHTML = gigPosterHTML(_ppGigProposal);
+        const sel = overlay.querySelector('[data-pp-tuning-select]');
+        if (sel) sel.classList.remove('hidden');
     }
 
     // Unpack the whole set before the first note.
@@ -1213,9 +1275,11 @@
             genre: prop.genre,
             genre_key: prop.genre_key,
             instrument: prop.instrument,
+            tuning_pref: prop.tuning_pref || 'any',
             idx: 0,
             restore,
         };
+        _ppGigLastTuning = null; // reset for fresh interstitial tracking
         closeBook();
         _ppGigProposal = null;
         // RAW filenames: the queue itself encodes for playSong — pre-encoding
@@ -1251,8 +1315,14 @@
             document.body.appendChild(strip);
         }
         const run = _ppGigRun;
-        const next = run.songs[run.idx + 1];
-        strip.innerHTML = `<b>GIG</b> · ${esc(run.genre)} at ${esc(_venueName(run.venue_id))} · set ${Math.min(run.idx + 1, run.songs.length)}/${run.songs.length}${next ? ` — next: <em>${esc(next.title)}</em>` : ' — closer!'}`;
+        if (_ppGigTuningHold) {
+            const song = run.songs[run.idx];
+            const tuning = (song && song.tuning_name) ? esc(song.tuning_name) : 'check tuning';
+            strip.innerHTML = `<b class="pp-gig-tune-label">Tune to: ${tuning}</b><button data-pp-gig-start-song="1" class="career-btn career-btn-primary pp-gig-start-btn">Start song</button>`;
+        } else {
+            const next = run.songs[run.idx + 1];
+            strip.innerHTML = `<b>GIG</b> · ${esc(run.genre)} at ${esc(_venueName(run.venue_id))} · set ${Math.min(run.idx + 1, run.songs.length)}/${run.songs.length}${next ? ` — next: <em>${esc(next.title)}</em>` : ' — closer!'}`;
+        }
     }
 
     function removeGigStrip() {
@@ -1264,6 +1334,8 @@
         // No fail state: an abandoned set logs nothing and says nothing.
         const run = _ppGigRun;
         _ppGigRun = null;
+        _ppGigLastTuning = null;
+        if (_ppGigTuningHold) { const h = _ppGigTuningHold; _ppGigTuningHold = null; h(); }
         removeGigStrip();
         restoreGigStage(run);
     }
@@ -1403,6 +1475,32 @@
     // Queue lifecycle: advance the strip per song; complete or abandon.
     function onGigSongLoading() {
         if (!_ppGigRun) return;
+        const run = _ppGigRun;
+        const song = run.songs[run.idx];
+        const tuningName = (song && song.tuning_name) || '';
+        const pref = run.tuning_pref || 'any';
+        // Interstitial: pause before first song (or when tuning changes) for all
+        // non-specific prefs, so the player has time to retune. "specific" is
+        // excluded because every song already matches one fixed tuning.
+        const needsInterstitial = !pref.startsWith('specific:') && (
+            run.idx === 0 || tuningName !== _ppGigLastTuning
+        );
+        _ppGigLastTuning = tuningName;
+        if (needsInterstitial) {
+            const fb = window.feedBack;
+            const holdFn = fb && typeof fb.holdAutoplay === 'function' ? fb.holdAutoplay : null;
+            _ppGigTuningHold = holdFn ? holdFn() : null;
+            if (_ppGigTuningHold) {
+                // Cancel the fail-open backstop — we manage the dismiss ourselves
+                // (user clicks "Start song"). A song navigation clears the hold anyway.
+                _ppGigTuningHold.settle();
+            }
+            if (_ppGigTuningHold && window.tuner && typeof window.tuner.enable === 'function') {
+                window.tuner.enable({ auto: true }).catch(() => {});
+            }
+        } else {
+            _ppGigTuningHold = null;
+        }
         renderGigStrip();
     }
 
@@ -1482,6 +1580,28 @@
             closeBook();
             return;
         }
+        // Tuning pref pill on the gig poster
+        const tuningPill = e.target.closest('[data-pp-tuning]');
+        if (tuningPill) {
+            const pref = tuningPill.dataset.ppTuning;
+            if (pref === 'specific') {
+                _openSpecificTuningPicker();
+            } else {
+                _ppGigTuningPref = pref;
+                lsSet(PP_TUNING_PREF_KEY, pref);
+                _ppGigTuningNames = []; // reset specific cache on pref change
+                if (_ppGigProposal) bookGig(_ppGigProposal.genre_key);
+            }
+            return;
+        }
+        // "Start song" interstitial button (mid-gig tuning pause)
+        if (e.target.closest('[data-pp-gig-start-song]') && _ppGigTuningHold) {
+            const release = _ppGigTuningHold;
+            _ppGigTuningHold = null;
+            renderGigStrip();
+            release();
+            return;
+        }
         const gigBtn = e.target.closest('[data-pp-gig]');
         if (gigBtn) { bookGig(gigBtn.dataset.ppGig); return; }
         if (e.target.closest('[data-pp-gig-play]')) { startGig(e.target.closest('[data-pp-gig-play]')); return; }
@@ -1539,11 +1659,23 @@
     }
 
     function boot() {
+        // Restore persisted tuning preference
+        _ppGigTuningPref = lsGet(PP_TUNING_PREF_KEY) || 'any';
         const screen = document.getElementById('plugin-career');
         if (screen) {
             screen.addEventListener('click', onClick);
             screen.addEventListener('pointermove', onTiltMove);
             screen.addEventListener('pointerleave', onTiltLeave);
+            // Specific-tuning select change: rebook with the chosen tuning
+            screen.addEventListener('change', (e) => {
+                const sel = e.target.closest('[data-pp-tuning-select]');
+                if (!sel || !_ppGigProposal) return;
+                const val = sel.value;
+                if (!val) return;
+                _ppGigTuningPref = 'specific:' + val;
+                lsSet(PP_TUNING_PREF_KEY, _ppGigTuningPref);
+                bookGig(_ppGigProposal.genre_key);
+            });
         }
         const sm = window.feedBack;
         if (sm && typeof sm.on === 'function') {
@@ -1576,10 +1708,20 @@
     window.__careerPassportTest = {
         ppKey, ppJitter, ppLabel, detectNewBadges, seenBadges, markBadgeSeen,
         fmtHours, ppFillFraction, careerTotals, closestAskHTML,
-        onGigSongEnded, onGigSongStop,
+        onGigSongEnded, onGigSongStop, onGigSongLoading,
         setGigRun(r) { _ppGigRun = r; },
         getGigRun() { return _ppGigRun; },
         setView(v) { _pp = v; },
+        getTuningHold() { return _ppGigTuningHold; },
+        setTuningHold(h) { _ppGigTuningHold = h; },
+        getTuningPref() { return _ppGigTuningPref; },
+        setTuningPref(p) { _ppGigTuningPref = p; },
+        getLastTuning() { return _ppGigLastTuning; },
+        setLastTuning(t) { _ppGigLastTuning = t; },
+        getBookGen() { return _ppBookGen; },
+        setBookGen(g) { _ppBookGen = g; },
+        getProposal() { return _ppGigProposal; },
+        bookGig, closeBook,
     };
 
     if (document.readyState === 'loading') {

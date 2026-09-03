@@ -529,7 +529,7 @@ def _current_venue():
     return best
 
 
-def _fill_genre_songs(gkey, exclude, limit):
+def _fill_genre_songs(gkey, exclude, limit, tuning_ok=None):
     """Library songs of a genre to round out a gig — ANY song of the genre the
     set hasn't already picked.
 
@@ -553,15 +553,39 @@ def _fill_genre_songs(gkey, exclude, limit):
     if db is None:
         return []
     rows = db.conn.execute(
-        f"SELECT filename, title, artist, {_genre_expr(db)} AS g FROM songs"
+        f"SELECT filename, title, artist, {_genre_expr(db)} AS g, tuning_name FROM songs"
     ).fetchall()
     pool = [
-        {"filename": filename, "title": title or filename, "artist": artist or ""}
-        for filename, title, artist, genre in rows
-        if _genre_key(genre) == gkey and filename not in exclude
+        {"filename": fn, "title": title or fn, "artist": artist or "", "tuning_name": tn or ""}
+        for fn, title, artist, genre, tn in rows
+        if _genre_key(genre) == gkey and fn not in exclude
+        and (tuning_ok is None or tuning_ok(tn or ""))
     ]
     random.shuffle(pool)   # re-roll must vary; free per call
     return pool[:limit]
+
+
+def _tuning_ok_fn(tuning_pref):
+    """Return a (tuning_name: str) -> bool callable for the given preference.
+
+    Returns None for 'any' (no filter). 'standard' matches names ending in
+    ' Standard'; 'drop' matches names containing 'Drop' (covers Drop D, Drop C,
+    Double Drop D, etc.); 'specific:<name>' matches exact names. Unknown or
+    malformed prefs treat as 'any' rather than hard-failing — a stale client
+    request must not break gig booking.
+    """
+    if not tuning_pref or tuning_pref == "any":
+        return None
+    if tuning_pref == "standard":
+        return lambda n: bool(n) and n.endswith(" Standard")
+    if tuning_pref == "drop":
+        return lambda n: bool(n) and "Drop" in n
+    if tuning_pref.startswith("specific:"):
+        spec = tuning_pref[len("specific:"):]
+        if not spec or len(spec) > 64:
+            return None
+        return lambda n, _s=spec: n == _s
+    return None  # unknown pref → no filter
 
 
 def _validate_pack_dir(pack_dir: Path):
@@ -823,6 +847,8 @@ def setup(app, context):
             raise HTTPException(400, "Unknown instrument.")
         if not gkey or len(genre) > GENRE_MAX_LEN:
             raise HTTPException(400, "Provide a genre.")
+        tuning_pref = str((body or {}).get("tuning_pref") or "any")
+        tuning_ok = _tuning_ok_fn(tuning_pref)
         cfg = _gig_config()
         try:
             size = int((body or {}).get("size") or 4)
@@ -831,6 +857,18 @@ def setup(app, context):
         size = max(cfg["min_songs"], min(cfg["max_songs"], size))
         played, _seconds = _played_by_instrument_genre()
         stubs = list(played.get((inst, gkey), {}).values())
+        # Annotate stubs with tuning_name (batch lookup to avoid N+1).
+        if stubs and _state["meta_db"] is not None:
+            fns = [s["filename"] for s in stubs]
+            ph = ",".join("?" * len(fns))
+            tn_rows = _state["meta_db"].conn.execute(
+                f"SELECT filename, tuning_name FROM songs WHERE filename IN ({ph})", fns
+            ).fetchall()
+            tn_by_file = {fn: (tn or "") for fn, tn in tn_rows}
+            for s in stubs:
+                s.setdefault("tuning_name", tn_by_file.get(s["filename"], ""))
+        if tuning_ok is not None:
+            stubs = [s for s in stubs if tuning_ok(s.get("tuning_name", ""))]
         req = _badge_requirement(gkey, inst)
         qualifying = [s for s in stubs if s["stars"] >= req["min_stars"]]
         rest = [s for s in stubs if s["stars"] < req["min_stars"]]
@@ -855,18 +893,26 @@ def setup(app, context):
             picks.append(s)
         if len(picks) < size:
             exclude = {s["filename"] for s in picks}
-            picks.extend(_fill_genre_songs(gkey, exclude, size - len(picks)))
+            picks.extend(_fill_genre_songs(gkey, exclude, size - len(picks), tuning_ok))
         if not picks:
+            if tuning_pref and tuning_pref != "any":
+                label = ("standard-tuning " if tuning_pref == "standard"
+                         else "drop-tuning " if tuning_pref == "drop"
+                         else f"“{tuning_pref[len('specific:'):]}”-tuning "
+                         if tuning_pref.startswith("specific:") else "")
+                raise HTTPException(404, f"No {label}songs of this genre in the library.")
             raise HTTPException(404, "No songs of this genre in the library.")
         venue = _current_venue()
         return {
             "instrument": inst,
             "genre": genre,
             "genre_key": gkey,
+            "tuning_pref": tuning_pref,
             "venue_id": venue["id"] if venue else None,
             "venue_name": venue["name"] if venue else "",
             "songs": [{"filename": s["filename"], "title": s.get("title") or s["filename"],
-                       "artist": s.get("artist") or ""} for s in picks[:size]],
+                       "artist": s.get("artist") or "", "tuning_name": s.get("tuning_name") or ""}
+                      for s in picks[:size]],
         }
 
     @app.post(f"/api/plugins/{PLUGIN_ID}/gigs")
@@ -934,6 +980,27 @@ def setup(app, context):
             st["gigs"] = st["gigs"][-500:]
             _save_json(_state_file(), st)
         return {"ok": True, "gig": gig}
+
+    @app.get(f"/api/plugins/{PLUGIN_ID}/gigs/tunings")
+    def gig_tunings(genre: str = ""):
+        """Distinct tuning names present in a genre's song pool, for the
+        specific-tuning picker in the gig poster UI. Sorted by the library's
+        own tuning_sort_key so the list matches the main library tuning filter."""
+        gkey = _genre_key(_genre_display(genre)) if genre else ""
+        if not gkey:
+            return {"tunings": []}
+        db = _state["meta_db"]
+        if db is None:
+            return {"tunings": []}
+        rows = db.conn.execute(
+            f"SELECT tuning_name, tuning_sort_key, {_genre_expr(db)} AS g "
+            "FROM songs WHERE tuning_name != ''"
+        ).fetchall()
+        seen: dict[str, int] = {}
+        for tn, sk, genre_raw in rows:
+            if _genre_key(genre_raw) == gkey and tn and tn not in seen:
+                seen[tn] = sk or 0
+        return {"tunings": sorted(seen.keys(), key=lambda n: (seen[n], n))}
 
     @app.post(f"/api/plugins/{PLUGIN_ID}/packs/{{venue_id}}/download")
     def start_download(venue_id: str):
