@@ -168,3 +168,110 @@ describe('career-gig-tuning interstitial', () => {
         assert.equal(get(ctx, 'window.__careerPassportTest.getTuningHold()'), null);
     });
 });
+
+// ---------------------------------------------------------------------------
+// bookGig — generation guard (F1) and 404-only revert (F2)
+// ---------------------------------------------------------------------------
+
+describe('career-gig-tuning bookGig', () => {
+    // Helper: make a ctx where bookGig is callable.
+    // fetch is overridable per-test via ctx.fetch.
+    function makeBookCtx() {
+        const ctx = vm.createContext({
+            window: {},
+            document: {
+                getElementById: () => null,
+                readyState: 'complete',
+                addEventListener: () => {},
+            },
+            localStorage: {
+                _store: {},
+                getItem(k) { return this._store[k] != null ? this._store[k] : null; },
+                setItem(k, v) { this._store[k] = String(v); },
+            },
+            clearTimeout: () => {},
+            setTimeout: () => 42,
+            fetch: null,   // set per test
+            console,
+        });
+        ctx.window.feedBack = { on: () => {}, emit: () => {} };
+        vm.runInContext(SCREEN_JS, ctx);
+        // Seed _pp so bookGig can find the passport
+        vm.runInContext(`
+            window.__careerPassportTest.setView({
+                instruments: {
+                    guitar: {
+                        passports: [{ genre_key: 'rock', genre: 'Rock' }]
+                    }
+                }
+            });
+        `, ctx);
+        return ctx;
+    }
+
+    test('F1: stale response from superseded request is discarded — _ppGigProposal keeps new value', async () => {
+        // Failure input: two requests fire; second completes first; first (stale) must be dropped.
+        // Without the generation guard, the stale Drop response would overwrite the Standard proposal.
+        const ctx = makeBookCtx();
+        let resolveFirst, resolveSecond;
+        const first  = new Promise(r => { resolveFirst  = r; });
+        const second = new Promise(r => { resolveSecond = r; });
+        let callCount = 0;
+        ctx.fetch = () => {
+            callCount++;
+            return callCount === 1 ? first : second;
+        };
+
+        // Fire first request (drop), don't resolve yet
+        const p1 = vm.runInContext(`
+            window.__careerPassportTest.setTuningPref('drop');
+            window.__careerPassportTest.bookGig('rock');
+        `, ctx);
+
+        // Fire second request (standard) — increments gen
+        const p2 = vm.runInContext(`
+            window.__careerPassportTest.setTuningPref('standard');
+            window.__careerPassportTest.bookGig('rock');
+        `, ctx);
+
+        // Resolve SECOND first (standard wins)
+        resolveSecond({ ok: true, status: 200, json: async () => ({ songs: [{ filename: 'standard.sloppak', tuning_name: 'E Standard' }], tuning_pref: 'standard' }) });
+        await p2;
+
+        // Now resolve stale FIRST (drop) — must be discarded
+        resolveFirst({ ok: true, status: 200, json: async () => ({ songs: [{ filename: 'drop.sloppak', tuning_name: 'Drop D' }], tuning_pref: 'drop' }) });
+        await p1;
+
+        // _ppGigProposal must reflect the second (standard) response, not the stale first.
+        // getProposal() exposes _ppGigProposal via the test seam.
+        const proposal = vm.runInContext('window.__careerPassportTest.getProposal()', ctx);
+        // If the generation guard is absent, stale drop overwrites standard → songs[0] is drop.sloppak
+        assert.ok(
+            proposal === null || proposal.songs[0].filename !== 'drop.sloppak',
+            'stale drop response must not overwrite the winning standard proposal'
+        );
+    });
+
+    test('F2: 500 error keeps user pref — only 404 reverts to any', async () => {
+        // Failure input: saved pref 'drop', server returns 500 → without fix, pref silently becomes 'any'
+        const ctx = makeBookCtx();
+        ctx.fetch = async () => ({ ok: false, status: 500, json: async () => ({}) });
+
+        vm.runInContext(`window.__careerPassportTest.setTuningPref('drop');`, ctx);
+        await vm.runInContext(`window.__careerPassportTest.bookGig('rock');`, ctx);
+
+        const pref = vm.runInContext(`window.__careerPassportTest.getTuningPref()`, ctx);
+        assert.equal(pref, 'drop', '500 error must not reset pref to any');
+    });
+
+    test('F2: 404 still reverts pref to any', async () => {
+        const ctx = makeBookCtx();
+        ctx.fetch = async () => ({ ok: false, status: 404, json: async () => ({ detail: 'No drop songs.' }) });
+
+        vm.runInContext(`window.__careerPassportTest.setTuningPref('drop');`, ctx);
+        await vm.runInContext(`window.__careerPassportTest.bookGig('rock');`, ctx);
+
+        const pref = vm.runInContext(`window.__careerPassportTest.getTuningPref()`, ctx);
+        assert.equal(pref, 'any', '404 must revert pref to any');
+    });
+});

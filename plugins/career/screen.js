@@ -49,6 +49,7 @@
     let _ppGigTuningNames = [];  // cached distinct tuning names for the specific picker
     let _ppGigTuningHold = null; // holdAutoplay release fn — non-null = interstitial active
     let _ppGigLastTuning = null; // tuning_name of the current gig song (for change detection)
+    let _ppBookGen = 0;          // generation counter — stale responses are discarded
 
     function $(id) { return document.getElementById(id); }
 
@@ -1127,28 +1128,37 @@
         const p = (((_pp.instruments || {})[inst] || {}).passports || [])
             .find((x) => x.genre_key === gkey);
         if (!p) return;
+        const gen = ++_ppBookGen; // F1: capture generation before await — stale responses discarded
         try {
             const res = await fetch(`${API}/gigs/propose`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ instrument: inst, genre: p.genre, tuning_pref: _ppGigTuningPref }),
             });
+            if (gen !== _ppBookGen) return; // stale response — a newer request supersedes this one
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                // Tuning filter yielded no songs → revert to 'any', re-render poster, notify
-                _ppGigTuningPref = 'any';
-                lsSet(PP_TUNING_PREF_KEY, 'any');
-                if (_ppGigProposal) {
-                    const overlay = $('pp-overlay');
-                    if (overlay) overlay.innerHTML = gigPosterHTML(_ppGigProposal);
+                if (res.status === 404) {
+                    // No-match 404: revert tuning pref to 'any', re-render poster to match
+                    _ppGigTuningPref = 'any';
+                    lsSet(PP_TUNING_PREF_KEY, 'any');
+                    if (_ppGigProposal) {
+                        const overlay = $('pp-overlay');
+                        if (overlay) overlay.innerHTML = gigPosterHTML(_ppGigProposal);
+                    }
                 }
+                // All errors: notify (404 has a tuning-specific message; others are generic)
                 if (window.fbNotify && typeof window.fbNotify.show === 'function') {
-                    try { window.fbNotify.show({ title: 'Tuning filter', message: (err && err.detail) || 'No songs match that tuning filter.', icon: '🎸' }); } catch (_) { /* */ }
+                    const msg = res.status === 404
+                        ? (err && err.detail) || 'No songs match that tuning filter.'
+                        : 'Could not book gig — please try again.';
+                    try { window.fbNotify.show({ title: 'Gig booking', message: msg, icon: '🎸' }); } catch (_) { /* */ }
                 }
                 return;
             }
             _ppGigProposal = await res.json();
         } catch (_) { return; }
+        if (gen !== _ppBookGen) return; // stale — superseded while awaiting json()
         const overlay = $('pp-overlay');
         if (!overlay) return;
         _ppBook = null; // the poster replaces the book in the overlay
@@ -1706,6 +1716,10 @@
         setTuningPref(p) { _ppGigTuningPref = p; },
         getLastTuning() { return _ppGigLastTuning; },
         setLastTuning(t) { _ppGigLastTuning = t; },
+        getBookGen() { return _ppBookGen; },
+        setBookGen(g) { _ppBookGen = g; },
+        getProposal() { return _ppGigProposal; },
+        bookGig,
     };
 
     if (document.readyState === 'loading') {
