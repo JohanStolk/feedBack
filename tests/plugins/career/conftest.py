@@ -33,7 +33,8 @@ class FakeMetaDb:
         self.conn.execute(
             """CREATE TABLE songs (
                    filename TEXT, title TEXT, artist TEXT,
-                   genre TEXT DEFAULT '', arrangements TEXT
+                   genre TEXT DEFAULT '', arrangements TEXT,
+                   tuning_name TEXT DEFAULT '', tuning_sort_key INTEGER DEFAULT 0
                )"""
         )
 
@@ -46,7 +47,7 @@ class FakeMetaDb:
                            last_played_at, seconds_total))
         if in_library:
             self.conn.execute(
-                "INSERT INTO songs SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS "
+                "INSERT INTO songs SELECT ?, ?, ?, ?, ?, '', 0 WHERE NOT EXISTS "
                 "(SELECT 1 FROM songs WHERE filename = ?)",
                 (filename, filename.replace(".feedpak", "").title(), "Test Artist",
                  genre,
@@ -54,10 +55,10 @@ class FakeMetaDb:
                  filename))
         self.conn.commit()
 
-    def add_song_only(self, filename, genre=""):
+    def add_song_only(self, filename, genre="", tuning_name=""):
         """A library song with no plays — feeds the genre (brochure) list."""
-        self.conn.execute("INSERT INTO songs VALUES (?, ?, ?, ?, ?)",
-                          (filename, filename, "Test Artist", genre, None))
+        self.conn.execute("INSERT INTO songs VALUES (?, ?, ?, ?, ?, ?, 0)",
+                          (filename, filename, "Test Artist", genre, None, tuning_name))
         self.conn.commit()
 
 

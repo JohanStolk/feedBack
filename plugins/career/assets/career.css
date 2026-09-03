@@ -789,3 +789,15 @@
 }
 .pp-giglog-row { font-size: 0.7rem; color: #6d5d40; padding: 0.1rem 0; }
 .pp-giglog-row b { color: #9a5b16; letter-spacing: 0.06em; }
+
+/* Tuning preference pills on gig poster */
+.pp-tuning-row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin: 0.5rem 0 0.3rem; }
+.pp-tuning-pill { font-size: 0.65rem; padding: 0.2rem 0.6rem; border-radius: 999px; opacity: 0.7; }
+.pp-tuning-pill-on { opacity: 1; border-color: #d9a253; color: #d9a253; }
+.pp-tuning-select { font-size: 0.7rem; background: #1a1510; color: #c8b48a; border: 1px solid rgba(138,122,94,0.5); border-radius: 4px; padding: 0.15rem 0.4rem; }
+.pp-poster-tuning-chip { font-size: 0.6rem; color: #8a7a5e; margin-left: 0.35rem; }
+
+/* Gig interstitial — tune up banner */
+.pp-gig-strip.pp-interstitial { pointer-events: auto; display: flex; align-items: center; gap: 0.75rem; border-radius: 8px; border-color: rgba(64,128,224,0.5); }
+.pp-gig-tune-label { color: #4080e0; letter-spacing: 0.08em; font-size: 0.78rem; }
+.pp-gig-start-btn { font-size: 0.7rem; padding: 0.25rem 0.7rem; }
