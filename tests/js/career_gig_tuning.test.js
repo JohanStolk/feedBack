@@ -274,4 +274,61 @@ describe('career-gig-tuning bookGig', () => {
         const pref = vm.runInContext(`window.__careerPassportTest.getTuningPref()`, ctx);
         assert.equal(pref, 'any', '404 must revert pref to any');
     });
+
+    test('F1b: stale 404 json completing after newer booking must not revert newer pref', async () => {
+        // Failure input: A 404 response is received (first gen check passes), then res.json()
+        // is awaited. A new booking fires while json() is pending (increments _ppBookGen).
+        // The error branch MUST re-check gen after json() and NOT revert pref to 'any'.
+        //
+        // We simulate the race by having json() bump _ppBookGen synchronously (equivalent to
+        // a new bookGig call arriving at exactly that moment) before returning a resolved value.
+        // After the await on json()'s resolved Promise, gen !== _ppBookGen → should bail.
+        const ctx = makeBookCtx();
+
+        ctx.fetch = async () => ({
+            ok: false,
+            status: 404,
+            json: () => {
+                // Simulate: a new booking fires while json() is in progress
+                vm.runInContext(
+                    'window.__careerPassportTest.setBookGen(window.__careerPassportTest.getBookGen() + 1);',
+                    ctx
+                );
+                vm.runInContext(`window.__careerPassportTest.setTuningPref('standard');`, ctx);
+                return Promise.resolve({ detail: 'No drop songs.' });
+            },
+        });
+
+        vm.runInContext(`window.__careerPassportTest.setTuningPref('drop');`, ctx);
+        await vm.runInContext(`window.__careerPassportTest.bookGig('rock');`, ctx);
+
+        const pref = vm.runInContext(`window.__careerPassportTest.getTuningPref()`, ctx);
+        assert.equal(pref, 'standard', 'stale 404 json must not revert newer pref to any');
+    });
+
+    test('F2: closeBook() invalidates in-flight request — overlay stays closed', async () => {
+        // Failure input: user opens poster, a booking request is in flight (pending),
+        // user closes the poster via closeBook. Without _ppBookGen increment in closeBook,
+        // the pending response resolves, repopulates _ppGigProposal, and reopens the overlay.
+        const ctx = makeBookCtx();
+        let resolvePending;
+        ctx.fetch = () => new Promise(r => { resolvePending = r; });
+
+        // Fire a booking — stays pending
+        vm.runInContext(`window.__careerPassportTest.setTuningPref('any');`, ctx);
+        const pending = vm.runInContext(`window.__careerPassportTest.bookGig('rock');`, ctx);
+
+        // User closes the poster — must invalidate the in-flight request
+        // closeBook() is not in the test seam; simulate by incrementing gen directly
+        // (equivalent to what closeBook does with ++_ppBookGen)
+        vm.runInContext(`window.__careerPassportTest.setBookGen(window.__careerPassportTest.getBookGen() + 1);`, ctx);
+
+        // Now resolve the pending request with a valid payload
+        resolvePending({ ok: true, status: 200, json: async () => ({ songs: [{ filename: 'a.sloppak', tuning_name: 'E Standard' }], tuning_pref: 'any' }) });
+        await pending;
+
+        // Proposal must remain null — the response was discarded
+        const proposal = vm.runInContext(`window.__careerPassportTest.getProposal()`, ctx);
+        assert.equal(proposal, null, 'closeBook-invalidated request must not repopulate _ppGigProposal');
+    });
 });

@@ -780,6 +780,7 @@
     function closeBook() {
         _ppBook = null;
         _ppGigProposal = null;   // a dismissed poster is a dismissed booking
+        ++_ppBookGen;             // invalidate any in-flight bookGig request
         const overlay = $('pp-overlay');
         if (overlay) { overlay.classList.add('hidden'); overlay.innerHTML = ''; }
         if (_ppReturnFocus && typeof _ppReturnFocus.focus === 'function' &&
@@ -1138,6 +1139,7 @@
             if (gen !== _ppBookGen) return; // stale response — a newer request supersedes this one
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
+                if (gen !== _ppBookGen) return; // stale — superseded while awaiting error json()
                 if (res.status === 404) {
                     // No-match 404: revert tuning pref to 'any', re-render poster to match
                     _ppGigTuningPref = 'any';
