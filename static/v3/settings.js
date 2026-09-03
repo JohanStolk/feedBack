@@ -28,8 +28,8 @@
     var RESET_MAP = {
         gameplay: {
             server: ['master_difficulty', 'av_offset_ms', 'miss_penalty',
-                'fail_behavior', 'countdown_before_song', 'default_arrangement'],
-            local: ['lefty', 'autoplayExit', 'arrangementNamingMode', 'countdownBeforeSong'],
+                'fail_behavior', 'countdown_before_song', 'default_arrangement', 'pathway'],
+            local: ['lefty', 'autoplayExit', 'showUpNext', 'confirmExitSong', 'arrangementNamingMode', 'countdownBeforeSong'],
             after: function () {
                 // Left-handed is held on the highway object, not re-derived
                 // from localStorage on load — flip it back to the default.
@@ -200,7 +200,9 @@
         });
     }
 
-    if (document.readyState === 'loading') {
+    // `defer` runs this at readyState 'interactive' — later scripts have not
+    // evaluated yet, so wait for DOMContentLoaded (see static/v3/index.html).
+    if (document.readyState !== 'complete') {
         document.addEventListener('DOMContentLoaded', init, { once: true });
     } else {
         init();

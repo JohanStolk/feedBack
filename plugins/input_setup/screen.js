@@ -23,6 +23,7 @@
     const INSTRUMENTS = {
         guitar: { label: 'Guitar', mode: 'audio' },
         bass: { label: 'Bass', mode: 'audio' },
+        vocals: { label: 'Vocals', mode: 'audio' },
         keys: { label: 'Keys / Piano', mode: 'midi' },
         piano: { label: 'Keys / Piano', mode: 'midi' },
         drums: { label: 'Drums', mode: 'midi' },
@@ -51,15 +52,16 @@
             sources = sources.filter((s) => s
                 && !/midi/i.test(String(s.providerId || ''))
                 && !/^midi-input/i.test(String(s.label || '')));
-            // De-dupe by display label — the desktop engine enumerates the same
-            // device under several driver types, so the same name can repeat.
-            const seen = new Set();
-            sources = sources.filter((s) => {
-                const key = String(s.label || '').toLowerCase();
-                if (seen.has(key)) return false;
-                seen.add(key);
-                return true;
-            });
+            // No label de-dupe here. The audio-input capability already
+            // collapses exact duplicates by logicalSourceKey
+            // (_visibleInputSources), so nothing it returns shares a key. A
+            // device that enumerates under several driver types (ASIO / Windows
+            // Audio / DirectSound) has a DISTINCT key per type and is now
+            // labelled with its driver type (e.g. "Focusrite (ASIO)") — each is
+            // a real, separately-selectable input the user must be able to see.
+            // The old bare-label collapse also kept whichever variant sorted
+            // first, which could silently drop the one that was actually
+            // `selected` below.
             const selected = sources.find((s) => s && s.selected) || null;
             return { sources, selected };
         } catch (_) { return { sources: [], selected: null }; }
@@ -132,16 +134,25 @@
                 const opts2 = sources.map((s) =>
                     '<option value="' + esc(s.logicalSourceKey || s.sourceId || '') + '"' + (s.selected ? ' selected' : '') + '>' + esc(s.label || 'Input') + '</option>').join('');
                 const hasDetector = !!(window.noteDetect && typeof window.noteDetect.launchCalibration === 'function');
+                const hasVocalCal = inst === 'vocals' && !!(window.feedBack && window.feedBack.vocalCalibration &&
+                    window.feedBack.vocalCalibration.version === 1 &&
+                    typeof window.feedBack.vocalCalibration.launch === 'function');
+                // For vocals: "Calibrate" iff vocal-cal facade present; "Continue" otherwise.
+                // For guitar/bass: "Calibrate" iff noteDetect present; "Continue" otherwise.
+                const canCalibrate = inst === 'vocals' ? hasVocalCal : hasDetector;
+                const notLoadedNotice = inst === 'vocals'
+                    ? (hasVocalCal ? '' : '<p class="text-xs text-fb-textDim mt-3">Vocal calibration isn’t available yet — you can set it up later from the player.</p>')
+                    : (hasDetector ? '' : '<p class="text-xs text-fb-textDim mt-3">The note detector isn’t loaded here — you can calibrate later from the player.</p>');
                 const body =
                     '<p class="text-sm text-fb-textDim">Pick your audio input, then run the calibration to set levels, channel and latency.</p>' +
                     (sources.length
                         ? '<label class="block text-xs uppercase tracking-wider text-fb-textDim mt-3 mb-1">Audio input</label>' +
                           '<select data-is-audio class="w-full bg-gray-800/50 border border-gray-700 rounded-md px-2 py-1.5 text-sm text-fb-text outline-none">' + opts2 + '</select>'
                         : '<p class="text-sm text-fb-accent mt-2">No audio input detected yet — plug in your interface, or skip and set this up later.</p>') +
-                    (hasDetector ? '' : '<p class="text-xs text-fb-textDim mt-3">The note detector isn’t loaded here — you can calibrate later from the player.</p>');
+                    notLoadedNotice;
                 const foot =
                     '<button type="button" data-is-cal class="bg-fb-primary hover:bg-fb-primaryHi text-white px-5 py-2 rounded-md font-medium">' +
-                    (hasDetector ? 'Calibrate' : 'Continue') + '</button>';
+                    (canCalibrate ? 'Calibrate' : 'Continue') + '</button>';
                 shell(inst, body, foot);
 
                 const sel = host.querySelector('[data-is-audio]');
@@ -161,8 +172,42 @@
                 // Tell the tuner tables / note_detect which instrument this is.
                 try { fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instrument: inst }) }); } catch (_) {}
 
-                host.querySelector('[data-is-cal]').addEventListener('click', () => {
-                    if (hasDetector) {
+                const calBtn = host.querySelector('[data-is-cal]');
+                let _advancing = false; // double-click guard for the auto-advance fallback
+                calBtn.addEventListener('click', () => {
+                    if (inst === 'vocals') {
+                        // Vocals calibration is handled by the vocal-highway plugin's
+                        // facade. Guard: if the facade is absent (plugin disabled or
+                        // not yet loaded), mark done with a notice and continue.
+                        const vc = window.feedBack && window.feedBack.vocalCalibration;
+                        if (vc && vc.version === 1 && typeof vc.launch === 'function') {
+                            const ov = document.getElementById('input-setup-overlay');
+                            const prevDisplay = ov ? ov.style.display : '';
+                            if (ov) ov.style.display = 'none';
+                            const restore = () => {
+                                const o = document.getElementById('input-setup-overlay');
+                                if (o) o.style.display = prevDisplay;
+                            };
+                            vc.launch({
+                                requester: 'input_setup',
+                                onDone: (_result) => { restore(); advance(inst, true); },
+                                onCancel: () => { restore(); /* stay on panel; user can skip or retry */ },
+                            });
+                        } else {
+                            // ponytail: vocal-highway not loaded — mark done so wizard doesn't hang
+                            if (_advancing) return; // double-click guard: one advance per panel
+                            _advancing = true;
+                            calBtn.disabled = true;
+                            const body = host.querySelector('[data-is-body]');
+                            if (body) body.innerHTML = '<p class="text-sm text-fb-textDim">Vocal calibration will be available once the Vocal Highway plugin is enabled. Continuing…</p>';
+                            // Store timer id so advance() (via _activeCleanup) can cancel it
+                            // if the user hits Skip before the 1800ms fires — prevents the
+                            // stale timer from double-advancing the wizard and dropping the
+                            // next instrument from both completed and skipped.
+                            const _timerId = setTimeout(() => advance(inst, true), 1800);
+                            _activeCleanup = () => clearTimeout(_timerId);
+                        }
+                    } else if (hasDetector) {
                         // Hide our own full-screen overlay while note_detect's
                         // Calibration Wizard runs on top. That wizard goes
                         // transparent (pointer-events:none) when it minimizes to
@@ -351,7 +396,7 @@
 
     // Settings-panel re-entry (settings.html "Set up input devices" button).
     // Re-runs the wizard for the player's selected instrument paths, falling
-    // back to all instruments when progression isn't available.
+    // back to all instruments when progression isn’t available.
     window._inputSetupRelaunch = async function () {
         let instruments = [];
         try {
@@ -362,7 +407,7 @@
                 instruments = paths.map((p) => (typeof p === 'string' ? p : (p && p.id))).filter(Boolean);
             }
         } catch (_) { /* offline — fall back below */ }
-        if (!instruments.length) instruments = ['guitar', 'bass', 'keys', 'drums'];
+        if (!instruments.length) instruments = ['guitar', 'bass', 'vocals', 'keys', 'drums'];
         launch(instruments);
     };
 })();

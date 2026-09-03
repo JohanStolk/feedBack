@@ -265,7 +265,7 @@
         const onboarding = st.onboarding || {};
         if (onboarding.calibration_status === 'completed') return; // raced a 100% run
         const pending = onboarding.calibration_status === 'pending';
-        const pct = Math.max(0, Math.min(100, Math.round((detail.accuracy || 0) * 100)));
+        const pct = Math.max(0, Math.min(100, Math.floor((detail.accuracy || 0) * 100)));
 
         const overlay = document.createElement('div');
         overlay.id = 'v3-calibration-retry';
@@ -320,7 +320,9 @@
             });
         }
     }
-    if (document.readyState === 'loading') {
+    // `defer` runs this at readyState 'interactive' — later scripts have not
+    // evaluated yet, so wait for DOMContentLoaded (see static/v3/index.html).
+    if (document.readyState !== 'complete') {
         document.addEventListener('DOMContentLoaded', boot, { once: true });
     } else {
         boot();

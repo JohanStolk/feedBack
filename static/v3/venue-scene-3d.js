@@ -18,6 +18,30 @@
     let _lastMood = 'idle';
     let _bound = false;
 
+    // The venue belongs to the SONG player and nowhere else.
+    //
+    // isVenueViz() only answers "is Venue the selected visualization" — a global
+    // preference. It says nothing about what is on screen. Other surfaces borrow
+    // the same highway_3d renderer (Virtuoso runs its practice charts on it), so
+    // with Venue selected they inherited the venue backdrop: the crowd and the
+    // stage showed up behind a chromatic exercise. The viz picker is a
+    // preference for the player; it is not a licence to paint the venue over
+    // whatever else happens to be using the renderer.
+    //
+    // So gate on both: Venue selected AND the player screen is the one showing.
+    function isPlayerScreen() {
+        try {
+            const active = document.querySelector('.screen.active');
+            return !!active && active.id === 'player';
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function shouldBeActive() {
+        return isVenueViz() && isPlayerScreen();
+    }
+
     function isVenueViz() {
         if (root && root.v3VenueViz && typeof root.v3VenueViz.isVenueVisualization === 'function') {
             const sel = root.v3VenueViz.getSelectedVizId
@@ -73,7 +97,7 @@
     function readArrangementSignal() {
         // Intentional karaoke/vocals signal: active arrangement name from the
         // highway WS (user selected Vocals in #arr-select). Do NOT use
-        // highway.getLyricsVisible() — lyrics overlay stays on during normal
+        // window.highway.getLyricsVisible() — lyrics overlay stays on during normal
         // guitar practice and must not force vocals POV.
         try {
             const si = root.highway && typeof root.highway.getSongInfo === 'function'
@@ -96,6 +120,7 @@
         if (_active) {
             syncInstrumentPov();
             syncVenueMotion();
+            syncCrowd(true);
             return;
         }
         _active = true;
@@ -105,6 +130,17 @@
         setH3dMood(_lastMood);
         syncInstrumentPov();
         syncVenueMotion();
+        syncCrowd(true);
+    }
+
+    function syncCrowd(on) {
+        // Reactive crowd video layer (career mode) — inert without a pack.
+        try {
+            if (root && root.v3VenueCrowd &&
+                typeof root.v3VenueCrowd.setVenueActive === 'function') {
+                root.v3VenueCrowd.setVenueActive(!!on);
+            }
+        } catch (_) { /* visual-only */ }
     }
 
     function syncVenueMotion() {
@@ -128,12 +164,14 @@
         _assetsLoaded = false;
         _loadFailed = false;
         setH3dActive(false);
+        syncCrowd(false);
         syncPlaceholderVisibility();
     }
 
     function syncViz(vizId) {
         const id = String(vizId || '');
-        if (id === 'venue') {
+        // Venue selected is necessary but not sufficient — see shouldBeActive.
+        if (id === 'venue' && isPlayerScreen()) {
             activate();
         } else {
             deactivate();
@@ -179,12 +217,19 @@
                 if (_active) syncInstrumentPov();
             });
             sm.on('viz:renderer:ready', () => {
-                if (isVenueViz()) activate();
+                if (shouldBeActive()) activate();
                 else deactivate();
             });
             sm.on('viz:reverted', () => deactivate());
+            // Leaving the player tears the venue down; coming back rebuilds it.
+            // Without this the backdrop followed the renderer onto every other
+            // surface that borrows it (Virtuoso's practice highway).
+            sm.on('screen:changed', () => {
+                if (shouldBeActive()) activate();
+                else deactivate();
+            });
         }
-        if (isVenueViz()) activate();
+        if (shouldBeActive()) activate();
     }
 
     function getState() {
@@ -221,6 +266,8 @@
         activate,
         deactivate,
         syncViz,
+        isPlayerScreen,
+        shouldBeActive,
         onAssetsLoaded,
         onAssetsFailed,
         onPerformanceState,
@@ -242,7 +289,9 @@
 
     if (typeof document !== 'undefined') {
         const boot = () => bindRuntime();
-        if (document.readyState === 'loading') {
+        // `defer` runs this at readyState 'interactive' — later scripts have not
+        // evaluated yet, so wait for DOMContentLoaded (see static/v3/index.html).
+        if (document.readyState !== 'complete') {
             document.addEventListener('DOMContentLoaded', boot);
         } else {
             boot();

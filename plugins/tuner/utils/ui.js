@@ -305,6 +305,12 @@ window._tunerUI = function(state, actions) {
     function renderStringNotes() {
         if (!state.stringNoteContainer) return;
         state.stringNoteContainer.innerHTML = '';
+        // Show the mic-verify control only for a selected (non-free) tuning.
+        if (state.verifyRow) {
+            const hasTuning = !!(state.selectedTuning && state.selectedTuning.length && !state.freeTune);
+            state.verifyRow.classList.toggle('hidden', !hasTuning);
+            if (!hasTuning) resetVerifyUI();
+        }
         if (!state.selectedTuning || state.selectedTuning.length === 0) {
             _syncStringOrderHelp(0);
             return;
@@ -325,6 +331,41 @@ window._tunerUI = function(state, actions) {
             state.stringNoteContainer.appendChild(btn);
         });
         _syncStringOrderHelp(total);
+    }
+
+    // ── Mic-verify UI (working-tuning PR 9b) ───────────────────────────────────
+    function _markVerifiedStrings(done) {
+        if (!state.stringNoteContainer) return;
+        state.stringNoteContainer.querySelectorAll('[data-freq]').forEach((btn, i) => {
+            btn.classList.toggle('ring-2', !!done[i]);
+            btn.classList.toggle('ring-emerald-400', !!done[i]);
+        });
+    }
+    function _syncVerifyProgress(vs) {
+        if (!vs || !state.verifyStatus) return;
+        const total = vs.done.length;
+        const done = vs.done.filter(Boolean).length;
+        state.verifyStatus.classList.remove('hidden');
+        state.verifyStatus.textContent = vs.complete
+            ? '✓ In tune — tuning verified'
+            : (done + ' of ' + total + ' strings in tune');
+        _markVerifiedStrings(vs.done);
+        if (vs.complete && state.verifyBtn) state.verifyBtn.textContent = 'Verify tuning';
+    }
+    function _startVerify() {
+        if (!window._tunerAutoOpen || typeof window._tunerAutoOpen.verifyStart !== 'function') return;
+        const vs = window._tunerAutoOpen.verifyStart();
+        if (!vs) return;
+        if (state.verifyBtn) state.verifyBtn.textContent = 'Verifying — play each string…';
+        _syncVerifyProgress(vs);
+    }
+    function resetVerifyUI() {
+        if (window._tunerAutoOpen && typeof window._tunerAutoOpen.verifyCancel === 'function') {
+            window._tunerAutoOpen.verifyCancel();
+        }
+        if (state.verifyBtn) state.verifyBtn.textContent = 'Verify tuning';
+        if (state.verifyStatus) { state.verifyStatus.classList.add('hidden'); state.verifyStatus.textContent = ''; }
+        _markVerifiedStrings([]);
     }
 
     function updateUI(result) {
@@ -387,13 +428,20 @@ window._tunerUI = function(state, actions) {
         if (window.feedBack && window.feedBack.emit) {
             window.feedBack.emit('tuner:frame', { note, cents, freq: displayFreq, hasSignal: true });
         }
+        // Mic-verify: feed the matched string + cents to a running verify session
+        // and reflect per-string progress on the panel.
+        if (!isManual && !state.freeTune && window._tunerAutoOpen
+            && typeof window._tunerAutoOpen.verifyFeed === 'function') {
+            const vs = window._tunerAutoOpen.verifyFeed(targetFreq, Math.round(cents));
+            if (vs) _syncVerifyProgress(vs);
+        }
     }
 
     function updateFloatingButtonVisibility() {
         const btn = document.getElementById('tuner-toggle-btn');
         if (!btn) return;
         const isPlayer = document.querySelector('.screen.active')?.id === 'player';
-        if (!state.showFloatingButton || isPlayer || window.feedBack?.isPlaying) {
+        if (isPlayer || window.feedBack?.isPlaying) {
             btn.classList.add('hidden');
         } else {
             btn.classList.remove('hidden');
@@ -565,6 +613,17 @@ window._tunerUI = function(state, actions) {
         title.textContent = 'TUNER';
         header.appendChild(title);
 
+        // Explicit close (the panel had no in-box dismiss before; persist mode
+        // needs one). Mirrors the settings gear on the opposite side.
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'absolute left-0 text-fb-textDim hover:text-fb-text transition-colors text-lg leading-none';
+        closeBtn.setAttribute('aria-label', 'Close tuner');
+        closeBtn.title = 'Close';
+        closeBtn.textContent = '×';
+        closeBtn.onclick = () => actions.disable();
+        state.closeBtn = closeBtn;
+        header.appendChild(closeBtn);
+
         const settingsBtn = document.createElement('button');
         settingsBtn.className = 'absolute right-0 text-fb-textDim hover:text-fb-text transition-colors';
         settingsBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>`;
@@ -624,8 +683,77 @@ window._tunerUI = function(state, actions) {
         state.vizContainer.className = 'w-full';
         state.uiContainer.appendChild(state.vizContainer);
 
+        // Mic-verify control (working-tuning PR 9b): play each string in tune to
+        // confirm your tuning — promotes 'assumed' → 'verified'. Shown only for a
+        // selected (non-free) tuning; visibility managed in renderStringNotes().
+        state.verifyRow = document.createElement('div');
+        state.verifyRow.className = 'w-full mt-2 hidden';
+        state.verifyBtn = document.createElement('button');
+        state.verifyBtn.className = 'tuner-verify-btn w-full text-[11px] text-fb-textDim hover:text-fb-text border border-fb-border/40 hover:border-fb-border/70 rounded-lg py-1.5 transition-colors';
+        state.verifyBtn.textContent = 'Verify tuning';
+        state.verifyBtn.title = 'Play each string in tune to confirm — marks your tuning verified';
+        state.verifyBtn.onclick = () => _startVerify();
+        state.verifyRow.appendChild(state.verifyBtn);
+        state.verifyStatus = document.createElement('div');
+        state.verifyStatus.className = 'text-[10px] text-fb-textDim text-center mt-1 hidden';
+        state.verifyRow.appendChild(state.verifyStatus);
+        state.uiContainer.appendChild(state.verifyRow);
+
+        // Auto-open nudge's explicit dismiss (hidden unless auto-opened; enable()
+        // toggles it). Closes the same way as the × — disable().
+        const skipBtn = document.createElement('button');
+        skipBtn.className = 'tuner-skip-btn hidden w-full mt-3 text-[11px] text-fb-textDim hover:text-fb-text border border-fb-border/40 hover:border-fb-border/70 rounded-lg py-1.5 transition-colors';
+        skipBtn.textContent = 'Skip';
+        skipBtn.title = "I've tuned — play the song";
+        skipBtn.onclick = () => actions.disable();
+        state.skipBtn = skipBtn;
+        state.uiContainer.appendChild(skipBtn);
+
+        // Auto-open escape hatch: leave the song entirely instead of committing to
+        // the play-now choice — so a gated retune is never a one-way trap. Mirrors
+        // Escape (the player's "Back to library" shortcut) and, like Escape, does
+        // NOT record a tuning (you're leaving, not asserting you tuned).
+        const backBtn = document.createElement('button');
+        backBtn.className = 'tuner-back-btn hidden w-full mt-2 text-[11px] text-fb-textDim hover:text-fb-text border border-fb-border/40 hover:border-fb-border/70 rounded-lg py-1.5 transition-colors';
+        backBtn.textContent = 'Back to library';
+        backBtn.title = 'Leave the song (Esc)';
+        backBtn.onclick = () => {
+            const exit = window.feedBack && window.feedBack.requestExitSong;
+            if (typeof exit === 'function') exit();
+            else if (typeof window.requestExitSong === 'function') window.requestExitSong();
+        };
+        state.backBtn = backBtn;
+        state.uiContainer.appendChild(backBtn);
+
         document.body.appendChild(state.uiContainer);
         state.uiContainer.addEventListener('click', (e) => e.stopPropagation());
+
+        // Re-anchor while the panel is open: the popover it hugs is
+        // vertically centered, so its rect shifts with viewport height.
+        // initUI() runs once (guarded above), so this binds a single listener.
+        window.addEventListener('resize', () => {
+            if (state.uiContainer && !state.uiContainer.classList.contains('hidden')) positionPanel();
+        });
+    }
+
+    // Resolve the sidebar Plugins popover to anchor the panel beside it.
+    // Prefer the host's stable plugin-control slot API and derive its popover
+    // container; fall back to the known popover id only if that's unavailable.
+    // Returns a visible rect, or null (→ caller uses the fixed fallback slot).
+    function _pluginsPopoverRect() {
+        let pop = null;
+        try {
+            if (window.feedBack?.ui && typeof window.feedBack.ui.playerControlSlot === 'function') {
+                const slot = window.feedBack.ui.playerControlSlot();
+                if (slot instanceof Element) pop = slot.closest('.v3-rail-pop') || slot;
+            }
+        } catch (_e) { /* host slot API failure → fall back to id lookup */ }
+        if (!pop) pop = document.getElementById('v3-rail-pop-plugins');
+        // offsetParent === null covers display:none on the element or any
+        // ancestor (more robust than testing a specific `hidden` class).
+        if (!pop || pop.offsetParent === null) return null;
+        const rect = pop.getBoundingClientRect();
+        return (rect.width || rect.height) ? rect : null;
     }
 
     function positionPanel() {
@@ -645,7 +773,20 @@ window._tunerUI = function(state, actions) {
                 .replace('right-0', '')
                 .replace('top-full', '')
                 .trim();
-            state.uiContainer.style.cssText = 'top:5rem;right:11rem';
+            const anchor = _pluginsPopoverRect();
+            if (anchor) {
+                // Anchor to the right of the Plugins popover, clamped to the
+                // viewport so the panel never opens off-screen (right/bottom)
+                // on a narrow or short window.
+                const GAP = 8, MARGIN = 8;
+                const pw = state.uiContainer.offsetWidth || 288;   // w-72
+                const ph = state.uiContainer.offsetHeight || 0;
+                const left = Math.max(MARGIN, Math.min(anchor.right + GAP, window.innerWidth - pw - MARGIN));
+                const top = Math.max(MARGIN, Math.min(anchor.top, window.innerHeight - ph - MARGIN));
+                state.uiContainer.style.cssText = `top:${top}px;left:${left}px`;
+            } else {
+                state.uiContainer.style.cssText = 'top:5rem;right:11rem';
+            }
             return;
         }
 
@@ -683,7 +824,11 @@ window._tunerUI = function(state, actions) {
 
         const handlePlay = () => {
             updateFloatingButtonVisibility();
-            if (state.enabled) actions.disable();
+            // A manually-opened tuner closes when playback starts (you don't tune
+            // while playing). An AUTO-opened tuner PERSISTS through the autoplay
+            // song:play that immediately follows song entry — that auto-close was
+            // the "opens then vanishes ~1s later" flash. It closes via Skip/×/leave.
+            if (state.enabled && !state.autoOpened) actions.disable();
         };
         const handleStop = () => updateFloatingButtonVisibility();
 
@@ -724,8 +869,15 @@ window._tunerUI = function(state, actions) {
         btn.textContent = 'Tuner';
         btn.title = 'Open Tuner';
         btn.onclick = window.tuner.toggle;
-        const closeBtn = isV3 ? null : controls.querySelector('button:last-child');
-        if (closeBtn) controls.insertBefore(btn, closeBtn);
+        // Anchor to the last DIRECT-child button of `controls` (the classic
+        // transport's close/exit button). A bare `button:last-child` can match
+        // a NESTED button that is not a direct child of `controls`, and
+        // `insertBefore()` then throws NotFoundError — which propagated out of
+        // the player-screen transition and aborted its render (feedBack#800).
+        // `:scope > button:last-of-type` restricts the anchor to a direct child;
+        // the parentNode check is a belt-and-suspenders guard before insertBefore.
+        const closeBtn = isV3 ? null : controls.querySelector(':scope > button:last-of-type');
+        if (closeBtn && closeBtn.parentNode === controls) controls.insertBefore(btn, closeBtn);
         else controls.appendChild(btn);
         updatePlayerButton();
     }
@@ -737,6 +889,7 @@ window._tunerUI = function(state, actions) {
         renderTuningOptions,
         renderStringNotes,
         updateUI,
+        resetVerify: resetVerifyUI,
         updateInstrumentDisplay: _updateInstrumentDisplay,
         updateSaveAsCustomVisibility: _updateSaveAsCustomVisibility,
         updateFreeTuneUI,

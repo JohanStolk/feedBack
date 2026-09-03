@@ -33,7 +33,8 @@
     // Accuracy badge ramp (design/04-badges.md §C): ≥90% good, 50–89% mid, <50% low.
     function accuracyBadge(acc) {
         if (acc == null) return '';
-        const pct = Math.round(acc * 100);
+        // Floor, never round: 100% must mean every note hit.
+        const pct = Math.floor(acc * 100);
         const color = acc >= 0.9 ? 'bg-fb-good' : (acc >= 0.5 ? 'bg-fb-mid' : 'bg-fb-low');
         const text = acc >= 0.5 && acc < 0.9 ? 'text-black' : 'text-white';
         return '<span class="absolute bottom-0 right-0 ' + color + '/90 ' + text +
@@ -67,7 +68,7 @@
         const l = fmtName(song);
         if (!l) return '';
         const c = l === 'FEEDPAK' ? 'bg-fb-primary text-white' : 'bg-black/70 text-fb-textDim';
-        return '<span class="absolute bottom-0 left-0 ' + c + ' text-[9px] font-bold px-1.5 py-0.5 rounded-tr-md tracking-wide">' + l + '</span>';
+        return '<span class="absolute bottom-0 left-0 ' + c + ' text-[0.5625rem] font-bold px-1.5 py-0.5 rounded-tr-md tracking-wide">' + l + '</span>';
     }
     // Inline pill for the hero (Pick/Continue) card, where the art is text-overlaid
     // and a corner badge would collide — sits next to the card's label instead.
@@ -75,7 +76,7 @@
         const l = fmtName(song);
         if (!l) return '';
         const c = l === 'FEEDPAK' ? 'bg-fb-primary/20 text-fb-primary' : 'bg-fb-card/80 text-fb-textDim';
-        return '<span class="' + c + ' text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wide shrink-0">' + l + '</span>';
+        return '<span class="' + c + ' text-[0.5625rem] font-bold px-1.5 py-0.5 rounded tracking-wide shrink-0">' + l + '</span>';
     }
 
     // ── Continue-Playing resume ──────────────────────────────────────────---
@@ -207,11 +208,16 @@
             '</div></div></div>' +
             continueCard +
             '</div>' +
-            // Stats row
+            // Stats row. The third slot belongs to the career plugin (it
+            // replaces the slot's content on v3:dashboard-rendered); the
+            // plugin-count stat is the built-in fallback when career is
+            // absent or has no state yet.
             '<div class="grid md:grid-cols-3 gap-6 mt-6">' +
             audioRoutingCard() +
             statCard(String(songCount), 'songs', 'text-fb-gold') +
+            '<div id="v3-dash-career-slot" class="grid">' +
             statCard(String(pluginCount), 'active', 'text-fb-good') +
+            '</div>' +
             '</div>' +
             recentSection +
             '</div>';
@@ -271,6 +277,8 @@
         sm.on('v3:profile-updated', () => render());
     }
     function boot() { render(); }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
+    // `defer` runs this at readyState 'interactive' — later scripts have not
+    // evaluated yet, so wait for DOMContentLoaded (see static/v3/index.html).
+    if (document.readyState !== 'complete') document.addEventListener('DOMContentLoaded', boot, { once: true });
     else boot();
 })();

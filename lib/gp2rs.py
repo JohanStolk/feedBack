@@ -1114,7 +1114,7 @@ def _build_xml(
     ET.SubElement(root, "arrangement").text = arrangement
     ET.SubElement(root, "offset").text = f"{audio_offset:.3f}"
     ET.SubElement(root, "songLength").text = f"{song_length:.3f}"
-    ET.SubElement(root, "startBeat").text = f"{beats[0].time:.3f}" if beats else "0.000"
+    ET.SubElement(root, "startBeat").text = f"{beats[0].time:.6f}" if beats else "0.000000"
     ET.SubElement(root, "averageTempo").text = str(tempo)
     ET.SubElement(root, "artistName").text = artist
     ET.SubElement(root, "albumName").text = album
@@ -1124,15 +1124,32 @@ def _build_xml(
     # for compatibility, and emit additional string6+ attributes (up to
     # `len(tuning)-1`) for 7+ string arrangements. FeedBack parses
     # them; the format ignores them.
+    #
+    # `stringCount` records the AUTHORITATIVE string count (== len(tuning)),
+    # because the 6-slot padding above erases the 4-vs-5-vs-6-string
+    # distinction for standard tunings (a 4-string bass, 5-string bass and
+    # 6-string guitar are otherwise byte-identical, all string0..5 = 0).
+    # parse_arrangement trims `tuning` back to this on read so downstream
+    # string-count derivation (song.arrangement_string_count, the editor's
+    # _stringCountFor) sees the real width instead of guessing. RS2014 and
+    # any other consumer simply ignore the unknown attribute.
     tuning_el = ET.SubElement(root, "tuning")
+    tuning_el.set("stringCount", str(len(tuning)))
     for i in range(max(6, len(tuning))):
         tuning_el.set(f"string{i}", str(tuning[i] if i < len(tuning) else 0))
     ET.SubElement(root, "capo").text = "0"
 
-    # Ebeats
+    # Ebeats — write beat times at MICROSECOND (6-decimal) precision, not
+    # millisecond (3-decimal). The editor/timeline DERIVES per-bar BPM from beat
+    # spans (bpm = beats·60/span), which amplifies any rounding: at 3 decimals a
+    # constant-tempo GP (e.g. 140) shows a spurious ±0.05–0.7 BPM per-bar drift
+    # (worse for fast/odd meters) because most bar lengths don't land on a ms
+    # boundary. gp2rs computes these times exactly from the GP tempo map, so the
+    # only loss is this format string — 6 decimals makes the derived tempo match
+    # GP's authored value. (Everything else stays at :.3f; only beats drive tempo.)
     ebeats = ET.SubElement(root, "ebeats", count=str(len(beats)))
     for b in beats:
-        ET.SubElement(ebeats, "ebeat", time=f"{b.time:.3f}", measure=str(b.measure))
+        ET.SubElement(ebeats, "ebeat", time=f"{b.time:.6f}", measure=str(b.measure))
 
     # Sections
     sections_el = ET.SubElement(root, "sections", count=str(len(sections)))
@@ -1826,9 +1843,10 @@ def convert_drum_track_to_drumtab(
     drum strings. Unknown percussion sounds (cowbell, tambourine etc.) are
     skipped — round-tripping them would require teaching `lib/drums.py` first.
     Callers can pass an empty dict as ``out_unmapped`` to receive a per-MIDI
-    record of every skipped note (``{midi: {"count": int, "times": [...]}}``,
-    times capped at 100 samples per note) so they can surface a warning or
-    offer a manual mapping UI.
+    record of every skipped note (``{midi: {"count": int, "times": [...],
+    "velocities": [...]}}``, times/velocities index-aligned and capped at
+    100 samples per note — velocities carry the source notes' real dynamics)
+    so they can surface a warning or offer a manual mapping UI.
 
     Honours GP repeat brackets and D.S./D.C./Coda/Fine jumps when
     ``expand_repeats`` is true — same `_build_playback_schedule` machinery
@@ -1884,18 +1902,29 @@ def convert_drum_track_to_drumtab(
                             # NB: do NOT shadow the outer `entry` loop
                             # variable from `for entry in schedule:`.
                             unmapped_rec = out_unmapped.setdefault(
-                                int(midi_note), {"count": 0, "times": []})
+                                int(midi_note),
+                                {"count": 0, "times": [], "velocities": []})
                             unmapped_rec["count"] += 1
                             if len(unmapped_rec["times"]) < 100:
                                 unmapped_rec["times"].append(round(t, 3))
+                                # Index-aligned with times: the note's real
+                                # dynamics (same 1-127 gate as mapped hits,
+                                # falling back to the 100 import default) so
+                                # a hand-mapping UI doesn't flatten them.
+                                _uv = int(getattr(note, "velocity", 0) or 0)
+                                unmapped_rec["velocities"].append(
+                                    _uv if 1 <= _uv <= 127 else 100)
                         continue
 
                     hit: dict = {"t": round(t, 3), "p": piece}
 
-                    # Velocity: GP stores 1-127 MIDI velocity directly; default
-                    # is 95 (Velocities.default). Pass through verbatim,
-                    # clamping defensively so a corrupt file can't poison the
-                    # wire format.
+                    # Velocity: GP stores 1-127 MIDI velocity directly. Note
+                    # this is GP's *authoring* default (95, Velocities.default)
+                    # — unrelated to the drumtab render default of 100
+                    # (DEFAULT_VELOCITY, lib/drums.py:179), which only applies
+                    # when `v` is omitted from a hit. Pass the GP value through
+                    # verbatim, clamping defensively so a corrupt file can't
+                    # poison the wire format.
                     vel = int(getattr(note, "velocity", 0) or 0)
                     if 1 <= vel <= 127:
                         hit["v"] = vel
@@ -1936,9 +1965,21 @@ def convert_drum_track_to_drumtab(
     # Times for unmapped notes were collected in beat-iteration order;
     # multi-voice measures can produce out-of-order beats, so sort each
     # entry's `times` list chronologically before returning to the caller.
+    # Velocities are index-aligned with times, so they must sort in
+    # LOCKSTEP — sorting times alone would silently reassign dynamics.
     if out_unmapped is not None:
         for _rec in out_unmapped.values():
-            _rec["times"].sort()
+            _vels = _rec.get("velocities")
+            if _vels and len(_vels) == len(_rec["times"]):
+                _pairs = sorted(zip(_rec["times"], _vels))
+                _rec["times"] = [p[0] for p in _pairs]
+                _rec["velocities"] = [p[1] for p in _pairs]
+            else:
+                # Belt-and-suspenders: times & velocities are always appended
+                # together under the same `len(times) < 100` guard above, so
+                # in practice the lengths can't diverge. Kept as a defensive
+                # fallback, not a real divergence case.
+                _rec["times"].sort()
 
     return {
         "version": drums_mod.SCHEMA_VERSION,
@@ -2039,7 +2080,7 @@ def convert_file(
         safe_name = track.name.strip().replace(" ", "_").replace("/", "_")
         filename = f"{safe_name}_{arr_name or 'arr'}.xml"
         filepath = out / filename
-        filepath.write_text(xml_str)
+        filepath.write_text(xml_str, encoding="utf-8")
         output_files.append(str(filepath))
 
     return output_files

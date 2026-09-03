@@ -33,10 +33,9 @@ def setup(app: FastAPI, context: dict):
             "lastInstrument": DEFAULT_INSTRUMENT,
             "freeTune": False,
             "customTunings": {},
-            "disabledTunings": [],
-            "showFloatingButton": True,
             "visualizationMode": "default",
             "audioInputMode": "auto",
+            "autoOpenOnTuningChange": False,
         }
         if not config_file.exists():
             return defaults
@@ -50,28 +49,23 @@ def setup(app: FastAPI, context: dict):
             res["lastInstrument"] = str(data.get("lastInstrument", DEFAULT_INSTRUMENT))
             res["freeTune"] = bool(data.get("freeTune", False))
             res["customTunings"] = data.get("customTunings", {})
-            res["disabledTunings"] = data.get("disabledTunings", [])
-            res["showFloatingButton"] = bool(data.get("showFloatingButton", True))
             res["visualizationMode"] = str(data.get("visualizationMode", "default"))
             raw_mode = str(data.get("audioInputMode", "auto"))
             res["audioInputMode"] = raw_mode if raw_mode in ("auto", "browser") else "auto"
+            # Fail closed: only a real JSON boolean enables the opt-in. A hand-edited /
+            # migrated / bad-client value (e.g. the string "false" or "0") must NOT be
+            # coerced to True by bool().
+            _auto_open = data.get("autoOpenOnTuningChange", False)
+            res["autoOpenOnTuningChange"] = _auto_open if isinstance(_auto_open, bool) else False
 
             if not isinstance(res["customTunings"], dict):
                 res["customTunings"] = {}
-            if not isinstance(res["disabledTunings"], list):
-                res["disabledTunings"] = []
 
             # Migrate custom tunings from old flat-list format
             res["customTunings"] = {
                 name: _migrate_custom_tuning(name, val)
                 for name, val in res["customTunings"].items()
             }
-
-            # Strip legacy disabledTunings entries that lack compound "instrument:name" format
-            res["disabledTunings"] = [
-                e for e in res["disabledTunings"]
-                if isinstance(e, str) and ":" in e
-            ]
 
             return res
         except Exception:
@@ -80,8 +74,10 @@ def setup(app: FastAPI, context: dict):
     def _write(data: dict) -> None:
         config_dir.mkdir(parents=True, exist_ok=True)
         current = _read()
-        # Strip keys that belong to core, not to this plugin's config.
-        for key in ("defaultTunings", "referencePitch"):
+        # Strip keys that belong to core, not to this plugin's config, plus
+        # retired keys (disabledTunings/showFloatingButton — their settings UI
+        # was removed) so a stale client can't re-persist them.
+        for key in ("defaultTunings", "referencePitch", "disabledTunings", "showFloatingButton"):
             data = {k: v for k, v in data.items() if k != key}
         current.update(data)
         config_file.write_text(json.dumps(current, indent=2), encoding="utf-8")

@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -5,6 +6,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE_ROOT = ROOT.parent
+
+# The plugin loader was carved out of static/app.js into its own module (R3a).
+# These tests assert on its source text, so they read it from its new home.
+PLUGIN_LOADER = ROOT / "static" / "js" / "plugin-loader.js"
 
 
 def _sibling_file(plugin_dir: str, filename: str) -> Path:
@@ -22,7 +27,7 @@ def _sibling_text(plugin_dir: str, filename: str, required_token: str | None = N
 
 
 def test_plugin_loader_guards_duplicate_hydration_and_scripts():
-    source = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+    source = PLUGIN_LOADER.read_text(encoding="utf-8")
 
     assert "let _loadPluginsInFlight = false" in source
     assert "window.feedBack._loadedPluginScripts" in source
@@ -30,7 +35,7 @@ def test_plugin_loader_guards_duplicate_hydration_and_scripts():
 
 
 def test_plugin_loader_unmounts_previous_ui_contributions_before_reregistering():
-    source = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+    source = PLUGIN_LOADER.read_text(encoding="utf-8")
 
     assert "const _pluginUiContributions = new Map()" in source
     assert "await _commandUiDomain(contribution.domain, 'unmount', plugin, contribution)" in source
@@ -38,15 +43,25 @@ def test_plugin_loader_unmounts_previous_ui_contributions_before_reregistering()
     assert "await _commandUiDomain(contribution.domain, 'mount', plugin, contribution)" in source
 
 
-def test_plugin_loader_unmounts_contributions_for_removed_plugins():
-    source = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+def test_plugin_loader_does_not_treat_response_absence_as_uninstall():
+    # A plugin transiently absent from /api/plugins (the backend clears its
+    # registry at the start of load_plugins() and repopulates incrementally
+    # while HTTP stays up, so restarts serve partial responses) must NOT be
+    # torn down: the old absence sweep unmounted UI contributions and
+    # unregistered the capability participant with no re-registration path
+    # (plugin scripts don't re-run), and the DOM/style wipes forced a
+    # mid-session screen.js re-evaluation that duplicated the desktop
+    # audio_engine's native signal chain.
+    source = PLUGIN_LOADER.read_text(encoding="utf-8")
 
-    assert "const livePluginIds = new Set(plugins.map((plugin) => plugin.id))" in source
-    assert "for (const [pluginId, contributions] of _pluginUiContributions)" in source
-    assert "const stalePlugin = { id: pluginId }" in source
-    assert "await _commandUiDomain(contribution.domain, 'unmount', stalePlugin, contribution)" in source
-    assert "window.feedBack?.capabilities?.unregisterParticipant?.(pluginId)" in source
-    assert "_pluginUiContributions.delete(pluginId)" in source
+    # The absence-triggered sweep is gone (rationale comment in its place)...
+    assert "const livePluginIds" not in source
+    assert "const stalePlugin = { id: pluginId }" not in source
+    assert "deliberately NO stale-contribution sweep" in source
+    # ...and the DOM/style reconcilers only act on plugins the response names.
+    assert "const respondedIds = new Set(plugins.map((p) => p.id))" in source
+    assert "respondedIds.has(pid) && !alreadyHydrated.has(pid)" in source
+    assert "responded.has(id) && !styled.has(id)" in source
 
 
 
@@ -59,13 +74,39 @@ def test_capability_visualizer_waits_for_registry_instead_of_hard_error():
 
 
 def test_app_shell_loads_capability_registry_before_app_runtime():
-    source = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+    source = (ROOT / "static" / "v3" / "index.html").read_text(encoding="utf-8")
 
-    assert '<script src="/static/capabilities.js"></script>' in source
-    assert '<script src="/static/capabilities/library.js"></script>' in source
+    assert re.search(r'<script[^>]+src="/static/capabilities\.js"', source)
+    assert re.search(r'<script[^>]+src="/static/capabilities/library\.js"', source)
     assert source.index('/static/diagnostics.js') < source.index('/static/capabilities.js')
     assert source.index('/static/capabilities.js') < source.index('/static/capabilities/library.js')
     assert source.index('/static/capabilities/library.js') < source.index('/static/app.js')
+
+
+def test_every_external_script_defers_so_document_order_is_execution_order():
+    """The shell's scripts must all execute in document order.
+
+    `capabilities.js` builds the `window.feedBack` bus and must run before
+    `app.js`, which calls `window.feedBack.on(...)` at top level. Today document
+    order gives that for free, because every script is a parse-time classic one.
+
+    That guarantee survives the ES-module migration ONLY while no script is a
+    *plain* classic script: `defer` and `type="module"` scripts share one
+    "execute after parsing" list and run in document order, but a plain classic
+    script runs DURING parse — ahead of every deferred one. So the moment
+    capabilities.js becomes a module while app.js is still plain, app.js runs
+    first and `window.feedBack.on` is undefined.
+
+    Pinning "no plain external scripts" is what keeps that from silently
+    regressing as tags flip to type="module" one at a time.
+    """
+    source = (ROOT / "static" / "v3" / "index.html").read_text(encoding="utf-8")
+
+    plain = [
+        tag for tag in re.findall(r'<script\b[^>]*\bsrc=[^>]*>', source)
+        if 'defer' not in tag and 'async' not in tag and 'type="module"' not in tag
+    ]
+    assert not plain, f"external scripts that would jump the deferred queue: {plain}"
 
 
 def test_capability_registry_exposes_claim_dispatch_and_ready_contracts():
@@ -117,7 +158,13 @@ def test_deferred_runtime_domains_remain_reserved_not_bridged():
 
 
 def test_capability_events_do_not_bridge_deferred_surfaces():
-    app_source = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+    # These are NEGATIVE assertions, so they must span every file the code could
+    # have moved to — otherwise carving a function out of app.js turns the guard
+    # vacuous instead of failing.
+    app_source = (
+        (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+        + PLUGIN_LOADER.read_text(encoding="utf-8")
+    )
     capability_source = (ROOT / "static" / "capabilities.js").read_text(encoding="utf-8")
 
     for token in ["return 'ui.navigation'", "return 'note-detection'", "eventName.startsWith('viz:') || eventName.startsWith('highway:')"]:
@@ -127,7 +174,7 @@ def test_capability_events_do_not_bridge_deferred_surfaces():
 
 
 def test_plugin_loader_registers_manifest_capability_declarations():
-    source = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+    source = PLUGIN_LOADER.read_text(encoding="utf-8")
 
     assert "const capabilityPlugins = fetchedPlugins.slice().sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')))" in source
     assert "capabilityApi.registerParticipants(capabilityPlugins)" in source
@@ -139,9 +186,15 @@ def test_app_event_bus_dispatches_locally_and_preserves_juce_stop_state():
     source = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
 
     assert "this.dispatchEvent(new CustomEvent(event, { detail }))" in source
-    assert "const hadPlayableSong = !!audio.src || !!window._juceAudioUrl || isPlaying" in source
-    assert "sm.emit('song:resume', payload)" in source
+    # `isPlaying` moved onto the shared player-state container (static/js/player-state.js)
+    # so a carved module can WRITE it — an imported binding is read-only.
+    assert "const hadPlayableSong = !!audio.src || !!window._juceAudioUrl || S.isPlaying" in source
     assert "window.feedBack.emit('song:resume', payload)" in source
+
+    # The JUCE audio-element shim — which re-emits song:resume through the session
+    # manager when JUCE owns the transport — was carved out into its own module (R3a).
+    juce = (ROOT / "static" / "js" / "juce-audio.js").read_text(encoding="utf-8")
+    assert "sm.emit('song:resume', payload)" in juce
 
 
 def test_nam_and_stems_use_owner_claim_dispatch_semantics():

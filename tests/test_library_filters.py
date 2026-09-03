@@ -24,6 +24,7 @@ def server_mod(tmp_path, monkeypatch):
     yield mod
     conn = getattr(getattr(mod, "meta_db", None), "conn", None)
     if conn is not None:
+        getattr(__import__("sys").modules.get("server"), "_join_background_db_threads", lambda: None)()
         conn.close()
 
 
@@ -292,6 +293,45 @@ def test_year_sort_asc_oldest_first(client, seeded):
     assert files == ["b.archive", "a.archive", "f.archive", "d.sloppak", "c.sloppak", "e.sloppak"]
 
 
+def test_difficulty_sort_pushes_unrated_to_bottom(client, server_mod):
+    """Personal difficulty (song_user_meta.user_difficulty) sorts like
+    mastery: an unrated (NULL) row must fall to the bottom in BOTH
+    directions rather than colliding with a real 1..5 rating at either
+    end."""
+    _put(server_mod, filename="easy.archive", title="Easy", artist="A",
+         arrangements=[{"index": 0, "name": "Lead", "notes": 1}])
+    _put(server_mod, filename="hard.archive", title="Hard", artist="B",
+         arrangements=[{"index": 0, "name": "Lead", "notes": 1}])
+    _put(server_mod, filename="unrated.archive", title="Unrated", artist="C",
+         arrangements=[{"index": 0, "name": "Lead", "notes": 1}])
+    server_mod.meta_db.set_song_user_meta("easy.archive", user_difficulty=1)
+    server_mod.meta_db.set_song_user_meta("hard.archive", user_difficulty=5)
+
+    asc = [s["filename"] for s in _get(client, sort="difficulty")["songs"]]
+    assert asc == ["easy.archive", "hard.archive", "unrated.archive"]
+
+    desc = [s["filename"] for s in _get(client, sort="difficulty-desc")["songs"]]
+    assert desc == ["hard.archive", "easy.archive", "unrated.archive"]
+
+
+def test_tree_view_songs_carry_user_difficulty(client, server_mod):
+    """`/api/library/artists` (the classic tree view's `query_artists`) must
+    batch-attach `user_difficulty` the same way `query_page` does for the
+    grid — otherwise the tree view's difficulty badge silently never
+    renders (song.user_difficulty stays undefined for every row)."""
+    _put(server_mod, filename="rated.archive", title="Rated", artist="A",
+         arrangements=[{"index": 0, "name": "Lead", "notes": 1}])
+    _put(server_mod, filename="unrated.archive", title="Unrated", artist="A",
+         arrangements=[{"index": 0, "name": "Lead", "notes": 1}])
+    server_mod.meta_db.set_song_user_meta("rated.archive", user_difficulty=4)
+
+    data = client.get("/api/library/artists").json()
+    songs = data["artists"][0]["albums"][0]["songs"]
+    by_filename = {s["filename"]: s for s in songs}
+    assert by_filename["rated.archive"]["user_difficulty"] == 4
+    assert by_filename["unrated.archive"]["user_difficulty"] is None
+
+
 def test_tuning_sort_down_tuned_before_up_tuned_at_same_distance(client, server_mod):
     """Within an ABS(tuning_sort_key) tier, the down-tuned variant
     must come before the up-tuned one so the order matches the chart's
@@ -398,6 +438,39 @@ def test_query_stats_groups_non_ascii_artist_letters_under_hash(client, server_m
     assert stats["letters"] == {"#": 1}
 
 
+def test_query_stats_sort_letters_artist_counts_songs(client, server_mod):
+    """The v3 jump rail's `sort_letters` counts SONGS per first-letter bucket
+    of the active sort column (vs `letters`, which counts distinct artists).
+    Two songs by the same A-artist → letters {A:1}, sort_letters {A:2}."""
+    _put(server_mod, filename="a1.archive", title="Song One", artist="Abba")
+    _put(server_mod, filename="a2.archive", title="Song Two", artist="Abba")
+    _put(server_mod, filename="b1.archive", title="Another", artist="Beck")
+    _put(server_mod, filename="num.archive", title="Track", artist="2Pac")
+
+    # sort_letters=1 opts into the active-sort breakdown (the jump rail path).
+    stats = client.get("/api/library/stats", params={"sort": "artist", "sort_letters": 1}).json()
+    assert stats["letters"] == {"A": 1, "B": 1, "#": 1}        # distinct artists
+    assert stats["sort_letters"] == {"A": 2, "B": 1, "#": 1}   # songs
+
+    # Without the opt-in, the extra breakdown is not computed or returned.
+    plain = client.get("/api/library/stats", params={"sort": "artist"}).json()
+    assert "sort_letters" not in plain
+    assert plain["letters"] == {"A": 1, "B": 1, "#": 1}
+
+
+def test_query_stats_sort_letters_follow_title_sort(client, server_mod):
+    """With a title sort, the rail buckets key on the TITLE's first letter,
+    not the artist's, so a tap lands on a real card in the grid's order."""
+    _put(server_mod, filename="z1.archive", title="Apple", artist="Zztop")
+    _put(server_mod, filename="z2.archive", title="Banana", artist="Zztop")
+
+    stats = client.get("/api/library/stats", params={"sort": "title", "sort_letters": 1}).json()
+    assert stats["sort_letters"] == {"A": 1, "B": 1}
+    # The legacy artist breakdown is unchanged regardless of sort — both songs
+    # share one artist, so it stays a single distinct-artist Z bucket.
+    assert stats["letters"] == {"Z": 1}
+
+
 def test_query_stats_ignores_null_letter_counts(server_mod):
     """Legacy/corrupt rows can surface as NULL-ish letter aggregate
     rows on some SQLite builds. The stats endpoint should ignore those
@@ -429,9 +502,13 @@ def test_query_stats_ignores_null_letter_counts(server_mod):
     server_mod.meta_db.conn.close()
     server_mod.meta_db.conn = FakeConn()
 
-    stats = server_mod.meta_db.query_stats()
+    stats = server_mod.meta_db.query_stats(want_sort_letters=True)
 
-    assert stats == {"total_songs": 1, "total_artists": 1, "letters": {"T": 1}}
+    # `sort_letters` (the v3 jump-rail breakdown) shares the GROUP BY letter
+    # path in this fake, so it surfaces the same single live bucket when the
+    # caller opts in.
+    assert stats == {"total_songs": 1, "total_artists": 1,
+                     "letters": {"T": 1}, "sort_letters": {"T": 1}}
 
 
 def test_compound_sort_with_legacy_dir_desc_doesnt_error(client, seeded):
@@ -576,3 +653,16 @@ def test_artist_filter_is_case_insensitive(client, seeded):
     data = _get(client, artist="a band")
     assert data["total"] == 1
     assert data["songs"][0]["filename"] == "a.archive"
+
+
+def test_unmatched_flag_and_quick_filter(server_mod, client):
+    # A per-card "no match" badge needs the row to carry the enrichment state.
+    _put(server_mod, filename="a.archive", title="Matched", artist="A")
+    _put(server_mod, filename="b.archive", title="Missed", artist="B")
+    server_mod.meta_db.apply_enrichment_match("b.archive", "h", "failed")   # no-match
+    rows = {s["filename"]: s for s in server_mod.meta_db.query_page()[0]}
+    assert rows["b.archive"]["unmatched"] is True
+    assert rows["a.archive"]["unmatched"] is False
+    # The "Unmatched" quick-filter (match=unmatched) returns only the failed song.
+    fns = [s["filename"] for s in client.get("/api/library?match=unmatched").json()["songs"]]
+    assert fns == ["b.archive"]

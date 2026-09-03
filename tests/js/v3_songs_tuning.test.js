@@ -7,7 +7,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const SONGS_JS = path.join(__dirname, '..', '..', 'static', 'v3', 'songs.js');
-const APP_JS = path.join(__dirname, '..', '..', 'static', 'app.js');
+// The tuning-display helpers were carved out of app.js into their own module (R3a).
+const APP_JS = path.join(__dirname, '..', '..', 'static', 'js', 'tuning-display.js');
 
 function extractBlock(src, startMarker) {
     const start = src.indexOf(startMarker);
@@ -27,14 +28,14 @@ function extractBlock(src, startMarker) {
 
 function loadTuningHelpers() {
     const src = fs.readFileSync(APP_JS, 'utf8');
-    const start = src.indexOf('function _looksLikeRawTuningOffsets(');
-    const endMarker = 'window.feedBack.parseRawTuningOffsets = parseRawTuningOffsets;';
-    const end = src.indexOf(endMarker);
-    if (start === -1 || end === -1) throw new Error('tuning helpers not found');
+    // The module is nothing BUT the tuning helpers now, so there is no block to
+    // slice out — take it whole. `export` is stripped so the vm sandbox can still
+    // evaluate it as a plain script (the window.* contract lives in app.js).
+    const body = src.replace(/^export /gm, '');
     const sandbox = { window: { feedBack: {} }, exports: {} };
     vm.createContext(sandbox);
     vm.runInContext(
-        src.slice(start, end + endMarker.length) + '\n'
+        body + '\n'
         + 'exports.displayTuningName = displayTuningName;\n'
         + 'exports.displayTuningTargets = displayTuningTargets;\n'
         + 'exports.parseRawTuningOffsets = parseRawTuningOffsets;',
@@ -64,9 +65,27 @@ const helpers = loadTuningHelpers();
 
 test('v3 songs.js uses display helpers for album-art tuning badge', () => {
     const src = fs.readFileSync(SONGS_JS, 'utf8');
-    assert.match(src, /displayTuningName\(song\.tuning_name \|\| song\.tuning\)/);
+    // The card renderer's row variable was renamed song → shown when grouped
+    // cards landed (the badge reads the representative chart); accept either.
+    // The raw read then moved behind shownTuningName() so the badge can answer
+    // for the active tuning perspective — accept that indirection too, and pin
+    // the fallback inside the helper below so this stays a real guard.
+    assert.match(
+        src,
+        /displayTuningName\((?:(?:song|shown)\.tuning_name \|\| (?:song|shown)\.tuning|shownTuning)\)/,
+    );
     assert.match(src, /displayTuningTargets/);
     assert.match(src, /parseRawTuningOffsets/);
+});
+
+test('the tuning-perspective helper still falls back to tuning_name || tuning', () => {
+    // shownTuningName() is what the badge now reads. With no perspective field
+    // set (guitar-lead, the default) it must resolve exactly what the badge
+    // used to read inline, or guitar players silently lose their tuning label.
+    const src = fs.readFileSync(SONGS_JS, 'utf8');
+    const body = src.match(/function shownTuningName\(song\)\s*\{[\s\S]*?\n {4}\}/);
+    assert.ok(body, 'shownTuningName() not found — the badge read moved again');
+    assert.match(body[0], /return song\.tuning_name \|\| song\.tuning;/);
 });
 
 test('raw offset tuning_name does not appear in rendered card HTML', () => {

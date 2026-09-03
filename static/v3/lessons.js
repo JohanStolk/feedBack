@@ -56,8 +56,8 @@
         const shown = arr.slice(0, max || 6);
         const extra = arr.length - shown.length;
         let html = shown.map((t) =>
-            '<span class="text-[10px] uppercase tracking-wider text-fb-textDim bg-black/30 border border-fb-border/50 rounded px-1.5 py-0.5">' + esc(t) + '</span>').join('');
-        if (extra > 0) html += '<span class="text-[10px] text-fb-textDim">+' + extra + '</span>';
+            '<span class="text-[0.625rem] uppercase tracking-wider text-fb-textDim bg-black/30 border border-fb-border/50 rounded px-1.5 py-0.5">' + esc(t) + '</span>').join('');
+        if (extra > 0) html += '<span class="text-[0.625rem] text-fb-textDim">+' + extra + '</span>';
         return '<div class="flex flex-wrap gap-1">' + html + '</div>';
     }
     function progressBar(passed, total) {
@@ -74,7 +74,7 @@
         if (st && st.passed) return '<span class="text-fb-good text-xs font-bold flex items-center gap-1">✓ Passed</span>';
         if (st && st.best_accuracy != null && st.best_accuracy > 0) {
             const acc = st.best_accuracy;
-            const pct = Math.round(acc * 100);
+            const pct = Math.floor(acc * 100);
             const color = acc >= 0.9 ? 'text-fb-good' : (acc >= 0.5 ? 'text-fb-mid' : 'text-fb-low');
             return '<span class="' + color + ' text-xs font-bold">' + pct + '%</span>';
         }

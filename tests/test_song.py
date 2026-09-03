@@ -249,6 +249,34 @@ def test_note_teaching_marks_tolerate_malformed_optional_ints():
         assert n.scale_degree == -1
 
 
+# ── Keys hand assignment ─────────────────────────────────────────────────────
+
+def test_note_hand_round_trips_under_literal_key():
+    """The keys hand assignment survives the wire as the literal `hand` key
+    (spelled out — `rh` is taken by right_hand, the bass plucking finger)."""
+    for hand in ("lh", "rh"):
+        n = Note(time=0.0, string=2, fret=12, hand=hand)
+        wire = note_to_wire(n)
+        assert wire["hand"] == hand
+        assert note_from_wire(wire) == n
+
+
+def test_note_hand_omitted_when_unassigned():
+    wire = note_to_wire(Note(time=0.0, string=0, fret=0))
+    assert "hand" not in wire
+    assert note_from_wire(wire).hand is None
+
+
+def test_note_hand_junk_never_emitted_and_decodes_to_unassigned():
+    """Emit side validates ('LH', True, … stay off the wire); decode side is a
+    strict enum so a hand-edited pack can't poison hand-split logic."""
+    for junk in ("LH", "left", "", True, 1, ["lh"]):
+        assert "hand" not in note_to_wire(
+            Note(time=0.0, string=0, fret=0, hand=junk))
+        assert note_from_wire(
+            {"t": 0.0, "s": 0, "f": 0, "hand": junk}).hand is None
+
+
 # ── Scale-degree derivation helpers (§6.2.2 / §7.7) ──────────────────────────
 
 @pytest.mark.parametrize("key,pc", [
@@ -298,6 +326,31 @@ def test_note_pitch_midi_bass_uses_bass_base():
     """A 4-string arrangement named 'Bass' uses the bass base (low E1 = 28),
     not the guitar base (40)."""
     bass = Arrangement(name="Bass", tuning=[0, 0, 0, 0])
+    assert note_pitch_midi(bass, Note(time=0, string=0, fret=0)) == 28
+
+
+def test_note_pitch_midi_authored_bass_type_uses_bass_base():
+    """Editor PR #335: a bass authored via `type` on an arrangement whose NAME
+    doesn't say "bass". arrangement_string_count now returns 4 for it, so the
+    open-string base MUST also be the bass base (low E1 = 28), not the guitar
+    octave (40). Pre-fix note_pitch_midi keyed is_bass off the name only, so
+    this returned 40 (4 lanes on a guitar octave — the exact inconsistency)."""
+    bass = Arrangement(
+        name="Low End", type="bass",
+        tuning=[0, 0, 0, 0],
+        notes=[Note(time=float(i), string=i, fret=0) for i in range(4)],
+    )
+    assert note_pitch_midi(bass, Note(time=0, string=0, fret=0)) == 28
+
+
+def test_note_pitch_midi_path_bass_flag_uses_bass_base():
+    """Same guarantee via the archive <arrangementProperties> pathBass flag on a
+    non-"bass"-named arrangement: bass base (28), not guitar (40)."""
+    bass = Arrangement(
+        name="Low End", path_bass=True,
+        tuning=[0, 0, 0, 0],
+        notes=[Note(time=float(i), string=i, fret=0) for i in range(4)],
+    )
     assert note_pitch_midi(bass, Note(time=0, string=0, fret=0)) == 28
 
 
@@ -1123,6 +1176,60 @@ def test_string_count_ignores_rs_padded_tuning_for_bass():
         notes=[Note(time=float(i), string=i, fret=0) for i in range(4)],
     )
     assert arrangement_string_count(arr) == 4
+
+
+def test_string_count_4_for_path_bass_flag_without_bass_in_name():
+    # Archive/DLC bass whose manifest ArrangementName isn't "Bass" but whose
+    # <arrangementProperties> pathBass flag is set. Notes on 0..3, tuning
+    # padded to the arrangement-XML length of 6. Pre-fix, name_based forced
+    # 6 (name has no "bass"), so this returned 6 despite the authoritative
+    # instrument flag saying bass.
+    arr = Arrangement(
+        name="Low End",
+        path_bass=True,
+        tuning=[0, 0, 0, 0, 0, 0],
+        notes=[Note(time=float(i), string=i, fret=0) for i in range(4)],
+    )
+    assert arrangement_string_count(arr) == 4
+
+
+def test_string_count_4_for_authored_bass_type_without_bass_in_name():
+    # Editor PR #335: an instrument `type` authored as bass on an arrangement
+    # whose NAME does not contain "bass" (the sloppak loader lifts the manifest
+    # `type` onto Arrangement.type). Notes on 0..3, tuning padded to 6.
+    # The editor lays out 4 lanes off the type; core must agree.
+    arr = Arrangement(
+        name="Low End",
+        type="bass",
+        tuning=[0, 0, 0, 0, 0, 0],
+        notes=[Note(time=float(i), string=i, fret=0) for i in range(4)],
+    )
+    assert arrangement_string_count(arr) == 4
+
+
+def test_string_count_6_for_authored_guitar_type_no_regression():
+    # A non-bass authored type on a generic name still resolves to the
+    # canonical 6 — the type signal only pulls DOWN to 4 for bass.
+    arr = Arrangement(
+        name="Track 1",
+        type="guitar",
+        notes=[Note(time=float(i), string=i, fret=0) for i in range(5)],
+    )
+    assert arrangement_string_count(arr) == 6
+
+
+def test_arrangement_is_bass_signal_safety():
+    # The manifest `type` is lifted onto arr.type verbatim; the helper must be
+    # safe against the messy shapes a hand-edited/loose source can produce.
+    from song import arrangement_is_bass
+    assert arrangement_is_bass(Arrangement(name="Low End", type="bass"))
+    assert arrangement_is_bass(Arrangement(name="Low End", type=" BASS "))  # ws/case
+    assert arrangement_is_bass(Arrangement(name="Low End", path_bass=True))
+    assert arrangement_is_bass(Arrangement(name="Slap Bass"))               # legacy name
+    # Non-bass / absent signals stay False (back-compat: no bass signal → 6).
+    assert not arrangement_is_bass(Arrangement(name="Lead", type=""))
+    assert not arrangement_is_bass(Arrangement(name="Rhythm", type="guitar"))
+    assert not arrangement_is_bass(Arrangement(name="", type=""))
 
 
 # ── compute_smart_names ───────────────────────────────────────────────────────

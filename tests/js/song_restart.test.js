@@ -14,13 +14,14 @@ const { extractFunction } = require('./test_utils');
 
 const APP_JS = path.join(__dirname, '..', '..', 'static', 'app.js');
 const V3_HTML = path.join(__dirname, '..', '..', 'static', 'v3', 'index.html');
-const V2_HTML = path.join(__dirname, '..', '..', 'static', 'index.html');
 
 function buildSandbox({ loopA = null, loopB = null, isPlaying = false } = {}) {
     const sandbox = {
         loopA,
         loopB,
-        isPlaying,
+        // isPlaying moved onto the shared player-state container so a carved module can
+        // WRITE it (an imported binding is read-only). Same value, same assertions.
+        S: { isPlaying, lastAudioTime: 0 },
         __cancelCountInCalls: 0,
         __seekCalls: [],
         __startCountInCalls: [],
@@ -43,7 +44,7 @@ function buildSandbox({ loopA = null, loopB = null, isPlaying = false } = {}) {
         },
         __togglePlay() {
             sandbox.__togglePlayCalls++;
-            sandbox.isPlaying = true;
+            sandbox.S.isPlaying = true;
             return Promise.resolve();
         },
     };
@@ -54,7 +55,7 @@ function buildSandbox({ loopA = null, loopB = null, isPlaying = false } = {}) {
 function loadRestart(sandbox, src, { audioSeekImpl } = {}) {
     const restartSrc = extractFunction(src, 'async function restartCurrentSong(');
     const code = `
-        var isPlaying = ${sandbox.isPlaying};
+        var S = { isPlaying: ${sandbox.S.isPlaying}, lastAudioTime: 0 };
         function _cancelCountIn() { __cancelCountInCalls++; }
         async function _audioSeek(s, reason) {
             return (${audioSeekImpl || '__audioSeek'})(s, reason);
@@ -135,13 +136,6 @@ test('failed/incomplete seek: does not start playback or count-in', async () => 
 test('V3 transport restart button exists with correct attributes', () => {
     const html = fs.readFileSync(V3_HTML, 'utf8');
     assert.match(html, /v3-transport-mid[\s\S]*onclick="restartCurrentSong\(\)"/);
-    assert.match(html, /title="Restart song"/);
-    assert.match(html, /aria-label="Restart song"/);
-});
-
-test('V2 transport restart button exists with correct attributes', () => {
-    const html = fs.readFileSync(V2_HTML, 'utf8');
-    assert.match(html, /#player-controls|player-controls[\s\S]*onclick="restartCurrentSong\(\)"/);
     assert.match(html, /title="Restart song"/);
     assert.match(html, /aria-label="Restart song"/);
 });

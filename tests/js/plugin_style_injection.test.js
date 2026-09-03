@@ -1,4 +1,4 @@
-// Verify the plugin `styles` capability in static/app.js: _injectPluginStyles
+// Verify the plugin `styles` capability in static/js/plugin-loader.js: _injectPluginStyles
 // adds exactly one versioned <link rel="stylesheet"> per plugin, swaps it on a
 // version upgrade (no duplicates, no stale tags), injects nothing for a plugin
 // without `styles`, and routes the URL through the sandboxed asset endpoint.
@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const APP_JS = path.join(__dirname, '..', '..', 'static', 'app.js');
+const PLUGIN_LOADER_JS = path.join(__dirname, '..', '..', 'static', 'js', 'plugin-loader.js');
 
 // Brace-balanced extraction of a `const NAME = (...) => { ... }` arrow, so a
 // nested object/template literal can't make a naive regex stop early.
@@ -84,7 +84,7 @@ function setupSandbox() {
         },
     };
     vm.createContext(sandbox);
-    const src = fs.readFileSync(APP_JS, 'utf8');
+    const src = fs.readFileSync(PLUGIN_LOADER_JS, 'utf8');
     const removeSrc = extractConstArrow(src, '_removePluginStyleTags');
     const injectSrc = extractConstArrow(src, '_injectPluginStyles');
     const reconcileSrc = extractConstArrow(src, '_reconcilePluginStyles');
@@ -204,15 +204,20 @@ test('does not collide tags across two different plugins', () => {
     assert.deepEqual(headLinks.map((l) => l.dataset.pluginId).sort(), ['a', 'b']);
 });
 
-test('reconcile removes the <link> of a plugin that vanished from /api/plugins', () => {
+test('reconcile keeps the <link> of a plugin absent from a partial response', () => {
     const { inject, reconcile, headLinks } = setupSandbox();
     inject(plug({ id: 'a' }));
     inject(plug({ id: 'b' }));
     assert.equal(headLinks.length, 2);
-    // `a` is no longer returned (uninstalled) — its stylesheet must be dropped.
+    // `a` is missing from this response. That happens transiently during a
+    // backend restart (the plugin registry repopulates while HTTP stays up),
+    // so absence is NOT an uninstall signal — the still-loaded plugin must
+    // keep its stylesheet or it renders visible-but-unstyled until it
+    // reappears. Explicit removal still happens via the not-ready/unstyled
+    // paths (tests below).
     reconcile([plug({ id: 'b' })]);
-    assert.equal(headLinks.length, 1);
-    assert.equal(headLinks[0].dataset.pluginId, 'b');
+    assert.equal(headLinks.length, 2);
+    assert.deepEqual(headLinks.map((l) => l.dataset.pluginId).sort(), ['a', 'b']);
 });
 
 test('reconcile removes the <link> of a plugin that is no longer ready', () => {

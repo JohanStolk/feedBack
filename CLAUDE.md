@@ -117,19 +117,21 @@ Notes:
 
 **Frontend scripts** — `screen.js` runs in the global scope via a `<script>` tag. It can access `window.playSong`, `window.showScreen`, `window.createHighway`, the `<audio>` element, and the `window.feedBack` event emitter.
 
+**ES-module plugins (`scriptType:"module"`)** — a plugin may instead ship a native ES-module graph with **no build step**: set `"scriptType": "module"` in `plugin.json`, make `screen.js` a one-line `import './src/main.js'`, and put the module tree under `src/` (served by the sandboxed `/api/plugins/<id>/src/{path}` route). The host injects it as `<script type="module">`, whose `onload` fires only after the whole static-import graph evaluates — so the loader's completion-by-`onload` + `_loadingPluginId` + `playSong` wrapper-chain ordering all hold. Resolve your own asset URLs (worklets, WASM) with `import.meta.url` — `document.currentScript` is `null` in a module. Module top-level code does **not** re-run when the user re-enters the screen at the same version (the host loads screen.js once and `showScreen` re-injects nothing), so keep per-visit re-init in a `screen:changed` handler, exactly as classic plugins do. Classic global-scope `screen.js` remains fully supported. See `docs/plugin-modules.md`.
+
 **The playSong wrapper chain** — Plugins commonly wrap `window.playSong` to hook into song playback. Plugins load alphabetically, so the last-loaded (alphabetically later) wrapper runs first, while the alphabetically first plugin runs closest to the original. Be aware that `await` calls in inner wrappers yield to the event loop — WebSocket messages can arrive before outer wrappers finish setup.
 
 ## Plugin Best Practices
 
 ### v3 UI (fee[dB]ack v0.3.0) — player-chrome contract
 
-v0.3.0 ships a redesigned UI behind a flag (`FEEDBACK_UI=v3` or the `/v3` route);
-the classic UI (v2) stays the default until 0.3.0 ships, so **plugins must work in
-both**. v3 reuses the same engine (`server.py`, `app.js`, `highway.js`, `playSong`,
+v0.3.0's redesigned UI is **the only UI** — the classic v2 shell and its
+`FEEDBACK_UI` / `/v2` opt-outs are gone, so there is no second shell to support.
+v3 reuses the same engine (`server.py`, `app.js`, `highway.js`, `playSong`,
 `showScreen`, capabilities, library providers, the `window.feedBackViz_<id>` /
 `setRenderer` contract), so a plugin's **backend, capabilities, `nav`/`screen`,
 visualization renderers, diagnostics, and settings export work unchanged** — v3
-surfaces `nav` in its sidebar and mounts screens exactly as v2 does.
+surfaces `nav` in its sidebar and mounts screens as before.
 
 **The only thing that changed is the player chrome.** If your plugin injects a
 control into it, you must adapt:
@@ -155,7 +157,7 @@ control into it, you must adapt:
   popovers 40).
 
 Full guide + the canonical snippet: **[docs/plugin-v3-ui.md](docs/plugin-v3-ui.md)**.
-Verify any player-injecting plugin in **both** `/` (v2) and `/v3`.
+Verify any player-injecting plugin at `/` — it and `/v3` serve the same v3 shell.
 
 ### Performance — never run DOM queries on a per-frame path
 
@@ -231,6 +233,18 @@ window.feedBackViz_my_viz = function () {
             // toneChanges, toneBase, mastery, hasPhraseData, inverted,
             // lefty, renderScale, lyricsVisible, the 2D coordinate
             // helpers project and fretX, and getNoteState (see below).
+            // The bundle OBJECT is reused across frames (mutated in
+            // place — no per-frame allocation): never cache it or
+            // compare its identity between frames; field values are
+            // only valid for the current draw call. Array FIELDS still
+            // swap reference when chart data changes, so field-identity
+            // caches (`myRef !== bundle.chords`) remain valid.
+            // Windowed-iteration helpers (stable fn refs): bundle
+            // .lowerBoundT(arr, time) is a lower-bound binary search on
+            // `.t` (notes/chords); bundle.lowerBoundTime(arr, time) on
+            // `.time` (beats/anchors/sections). Use these to cull to
+            // the visible window instead of full-scanning chart arrays
+            // per frame.
             // `stringCount` is the active arrangement's string count (4
             // for bass, 6 for guitar, 7+ for extended-range GP imports —
             // size string-indexed geometry against this, not a hardcoded
@@ -386,6 +400,14 @@ highway.setNoteStateProvider((note, chartTime) => {
 - The built-in 2D highway consults it in `drawNote` / `drawSustains` / the chord-frame path: 'hit'/'active' → bright string colour + additive halo + a contained "sizzle" (crackling sparks, throbbing core, a shockwave ring on a fresh strike) on the gem and a bright (vs dim) sustain trail; 'miss' → faint red wash. The bundled **3D highway** reads the same data via `bundle.getNoteState` (bright string-tinted outline + bright body + glowing sustain + a contained sparkle hugging the note rect on hit/active; red outline + suppressed body on miss). Custom renderers that want it call `bundle.getNoteState(note, chartTime)` — it null-guards and returns the normalized `{ state, alpha, color }` (or null).
 - This is orthogonal to the overlay contract: note_detect remains an overlay (HUD, diagnostic miss markers, the "currently detected" indicator) *and* a scorer that feeds this provider. A renderer that ignores `getNoteState` simply doesn't light gems — nothing breaks.
 
+#### 4. Chart-transform provider — remap the chart before rendering AND scoring (feedBack#952)
+
+The core-owned `chart-transform` provider coordinator applies synchronous chart substitutions after difficulty filtering. Register and select providers through the capability domain; it owns persistence, refresh, splitscreen propagation, failure attribution, and diagnostics.
+
+Provider inputs and staged outputs are isolated copies. Async returns or provider errors fail back to the original chart and expose only a fixed public failure reason. `getSongInfo()` remains the original chart contract; transform-aware consumers use the renderer bundle or `getStringCount()`, `getTuning()`, `getCapo()`, and `getCentOffset()`.
+
+See [docs/capability-recipes.md](docs/capability-recipes.md#chart-transform-provider) for the manifest and registration example.
+
 ### Audio mixer fader registration (feedBack#87)
 
 Plugins that produce audio outside the song's `<audio>` element (NAM amp output, synth voices, etc.) can register a labeled fader so users can balance them against the song from one mixer popover in the player controls.
@@ -450,6 +472,40 @@ window.feedBack.diagnostics.contribute('my_plugin', {
 ```
 
 Loaded from `static/diagnostics.js` ASAP in `<head>` so the console-wrap is in place before any other script runs. Available on the `window.feedBack.diagnostics` namespace alongside `snapshotConsole()`, `snapshotHardware()`, `snapshotUa()`, `snapshotLocalStorage()`, `snapshotContributions()`. Keep your payload small (< 100 KB) and don't include secrets — bundles are shared with maintainers.
+
+### Detachable panes — pop your panel out into its own window
+
+If your plugin has a floating panel that sits over the player — a mixer, a camera rig, a settings board — you can let the user pop it out into its own OS window and leave it there: while they play, across song switches, on a second monitor, minimized to the tray. Two calls:
+
+```js
+feedBack.panes.register({
+    id: 'camera_director',
+    title: 'Camera Director',
+    icon: '🎥',
+    element: () => panelEl,          // your existing panel, exactly as it is
+});
+feedBack.panes.attachChip(panelEl, 'camera_director');
+```
+
+**The host moves your real element.** Not a copy, not a re-render — the actual DOM node, adopted into the pop-out window, keeping its listeners and its closures. Your panel goes on running *your* code against *your* state. It looks and behaves like what was popped out because it **is** what was popped out. Nothing to mirror, nothing to keep in sync.
+
+The rules below are all things that have already gone wrong. Full contract: **[docs/plugin-panes.md](docs/plugin-panes.md)**.
+
+- **Your code still runs in the main window.** The element is *displayed* elsewhere; its closures, timers and `document` references still belong to the main realm. That is exactly why everything keeps working — and exactly why `document.body.appendChild(myPopover)` lands in the **main window, not the pane**. Anchor tooltips, popovers and menus to your panel, not to `document.body`. Measure with `el.ownerDocument.defaultView`, never a cached `window`.
+
+- **Don't hide your panel yourself when it pops out.** Core hides it and leaves a "bring it back" stub. If you also hide it, you will hide the node that just moved — and blank the pane window.
+
+- **Prefer `hidden` or a class over inline `display` for show/hide.** While popped out, core neutralises *placement* with `.fb-paned` (`position`, `inset`, `width`, `z-index`, `box-shadow`). An inline `display:none` on your panel reasserts itself the moment the pane docks back and the class is removed, so your panel returns invisible.
+
+- **`element` is a function so it can be resolved late.** Return the *live* node. If you rebuild your panel (Camera Director rebuilds on every mode change), re-run `attachChip` — it returns a `detach()`; call it before re-attaching, and again in your teardown.
+
+- **`isConnected` does not mean "docked".** A panel sitting in a pane window is very much connected — just not to *this* document. Test `el.ownerDocument === document`, or take the `onHost(hostId, el)` callback.
+
+- **rAF is throttled while the main window is backgrounded** — and it will be, whenever the user is looking at your pane. Event-driven panels (sliders, buttons) are unaffected. A panel that *animates continuously* may run slowly while it is the only thing on screen.
+
+- **Don't reach for BroadcastChannel, `postMessage`, or a second copy of your state.** There is one realm and one panel. If you find yourself synchronising, you have misunderstood the model.
+
+- **Nothing is required.** No panes API on the host → skip both calls, and your panel behaves exactly as it does today.
 
 ### Keyboard Shortcuts
 
@@ -540,6 +596,21 @@ tab, key/scale annotations, etc.). Published as **feedpak**; this codebase still
 **sloppak** name internally — same on-disk format. [docs/sloppak-spec.md](docs/sloppak-spec.md) is
 a local pointer + code map.
 
+**The spec is sacrosanct — read it BEFORE changing how this app reads or writes packs.** The
+spec repo defines the format; this app merely implements it ("a change is not part of the format
+until it lands here" — feedpak-spec/GOVERNANCE.md). Any new manifest key, file, or directory the
+app touches must land in the spec **first**, via the
+[FEP process](https://github.com/got-feedback/feedpak-spec/blob/main/CONTRIBUTING.md) (proposal
+issue → one spec PR updating spec + schemas + example + changelog → then re-run your PR's checks
+here; the gate verifies against the spec's HEAD, so it goes green the moment your key is real).
+CI enforces this: the `feedpak-spec` job
+([docs/feedpak-spec-gate.md](docs/feedpak-spec-gate.md)) fails any PR whose code touches a
+manifest key the spec doesn't declare, and there is **no in-repo bypass** — the exceptions
+file is a closed grandfather list that only shrinks. If the format seems to be missing something
+you need, that's a FEP conversation, not a workaround. (Cautionary tale: `original_audio`, #933 —
+shipped without a spec entry, and third-party packers reverse-engineered a folder convention out
+of a code comment.)
+
 **Key code:**
 - `lib/sloppak.py` — format detection, zip/directory resolution, metadata extraction, song loading
 - `lib/sloppak_convert.py` — sloppak assembly pipeline, Demucs stem splitting
@@ -552,6 +623,7 @@ a local pointer + code map.
 - **Storage** — `localStorage` for all user preferences
 - **Styling** — Tailwind CSS utility classes, dark theme (`bg-dark-600`, `text-gray-300`, accent `#4080e0`, gold `#e8c040`). Tailwind is served as a **prebuilt** stylesheet (`static/tailwind.min.css`, regenerated by `bash scripts/build-tailwind.sh`), **never** the runtime Play CDN — the CDN's on-the-fly JIT rescanned the DOM on the main thread and dropped ~26% of frames with the 3D highway (feedBack-desktop#110). The committed CSS only contains classes the build scanner saw, so CI (`tailwind-fresh`) rebuilds and diffs it; run the build script and commit when you add new classes. A plugin that uses classes not guaranteed in core (notably arbitrary values like `w-[37px]`) MUST ship its own compiled stylesheet via the `styles` manifest key, built with `corePlugins.preflight = false` (utilities only — core ships the one base reset). Plugins MUST NOT load the Tailwind Play CDN or any runtime CSS JIT. See constitution Principle II.
 - **Naming** — camelCase for JS functions, kebab-case for CSS classes, snake_case for plugin IDs
+- **Text selection (v3)** — the v3 UI defaults to `user-select: none` on `html` (in `static/v3/v3.css`) so accidental drag/double-click selection of chrome never looks broken. Form fields are always re-enabled, and a **plugin's mounted screen subtree (`.screen[id^="plugin-"]`) stays selectable by default**, so a plugin's copy-worthy text (lyrics, chord names, results, diagnostics) is unaffected — *unless your plugin renders copyable content OUTSIDE its `plugin-<id>` screen* (e.g. injected into the player chrome / a HUD overlay), which inherits the non-select default. Opt such content back in with the core-served **`.fb-selectable`** class (it sets `user-select: text` on the element + descendants; works for runtime-installed plugins since it's hand-authored in core CSS, not a scanned Tailwind utility). Never use a `* { user-select: none }` rule (breaks input carets/IME), and never use `user-select: none` to "lock" text — keep errors, IDs, paths, versions, and metadata selectable.
 - **Player layout** — `#player` is `display:flex; flex-direction:column; position:fixed; inset:0`. `#highway` is `flex:1`. `#player-controls` sits at the bottom. Hiding the highway collapses the layout — use `margin-top: auto` on controls if you need to hide it.
 
 ## Backend Conventions
@@ -618,7 +690,7 @@ The highway WebSocket at `/ws/highway/{filename}?arrangement={index}` streams th
 | `anchors` | `{ type, data: [{ time, fret, width }] }` | Fret zoom anchors |
 | `chord_templates` | `{ type, data: [{ name, frets: [6] }] }` | Named chord shapes |
 | `lyrics` | `{ type, data: [{ w, t, d }], source }` | Syllables: `w`=word, `t`=time, `d`=duration. `-` joins to previous, `+` = line break. `source` is one of `"xml"`, `"whisperx"`, `"user"` — UI can use it to render an "auto-transcribed" badge for `whisperx`. Sloppaks always include `source` (legacy sloppaks without a `lyrics_source` manifest key default to `"xml"` at load time). Loose folders set it based on which extractor matched. Absent only when no lyrics fired the message at all |
-| `tone_changes` | `{ type: 'tone_changes', base, data: [{ time, name }] }` | Optional — tone change events relative to the arrangement base tone; only sent if tones were found |
+| `tone_changes` | `{ type: 'tone_changes', base, base_rig?, data: [{ t, name, rig? }] }` | Optional — tone change events relative to the arrangement base tone; only sent if tones were found. Note the time key is **`t`**, not `time` (both the sloppak path and the legacy XML path emit `t`). `base_rig` and each entry's `rig` are the pack's **rig bindings** — ids into [`rigs.json`](https://github.com/got-feedback/feedpak-spec/blob/main/spec/feedpak-v1.md#79-rigsjson) (feedpak §6.9/§7.9), carried through verbatim and **not** resolved by core: selecting a realization and applying the `intent.gm` floor belong to whatever voices the part. Both are **omitted entirely** when the chart binds no rig, so consumers predating the rig model see the payload they always did. |
 | `notes` | `{ type, data: [{ t, s, f, sus, ho, po, sl, bn, ... }] }` | Single notes |
 | `chords` | `{ type, data: [{ t, notes: [{ s, f, sus, ... }] }] }` | Chord events |
 | `phrases` | `{ type, data: [{ start_time, end_time, max_difficulty, levels: [{ difficulty, notes, chords, anchors, handshapes }] }], total }` | Optional — per-phrase difficulty ladder for master-difficulty slider (feedBack#48). Only sent when the source chart carries multi-level phrase data (phrase-aware sloppak). Sent in chunks (`data` is a batch, `total` is the full count across messages) to avoid multi-MB single frames. Absent for GP imports and legacy sloppak; consumers must treat missing message as "single fixed difficulty — slider disabled". |

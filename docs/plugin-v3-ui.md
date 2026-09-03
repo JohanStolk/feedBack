@@ -1,16 +1,16 @@
 # Building plugins for the v3 UI (fee[dB]ack v0.3.0)
 
-v0.3.0 ("fee[dB]ack") ships a redesigned UI **behind a flag** — `FEEDBACK_UI=v3`
-or the `/v3` route. The classic UI (v2) remains the default until 0.3.0 ships, so
-plugins must work in **both**.
+v0.3.0 ("fee[dB]ack") ships a redesigned UI. It is **the only UI** — the classic v2
+shell and its `FEEDBACK_UI` / `/v2` opt-outs have been removed, so there is no
+longer a second shell to support.
 
-The good news: v3 **reuses the same engine** as v2 — same `server.py`, `app.js`,
-`highway.js`, `playSong`, `showScreen`, capability registry, library providers,
-and the `window.feedBackViz_<id>` / `setRenderer` visualization contract. So your
-plugin's **backend, capabilities, library providers, `nav`/`screen`, visualization
-renderers, diagnostics, and settings export all work unchanged in v3.** v3 surfaces
-your `nav` entry in the new sidebar (via `shell.js` `renderPluginNav`) and your
-screen mounts exactly as before.
+The good news: v3 **reuses the same engine** the classic UI did — same `server.py`,
+`app.js`, `highway.js`, `playSong`, `showScreen`, capability registry, library
+providers, and the `window.feedBackViz_<id>` / `setRenderer` visualization contract.
+So your plugin's **backend, capabilities, library providers, `nav`/`screen`,
+visualization renderers, diagnostics, and settings export all work unchanged.** v3
+surfaces your `nav` entry in the new sidebar (via `shell.js` `renderPluginNav`) and
+your screen mounts exactly as before.
 
 **The one thing that changed is the player chrome** — and only if your plugin
 injects controls into it.
@@ -188,4 +188,24 @@ out of the capability graph.
 - [ ] Dropdowns positioned via `getBoundingClientRect()`, not `#player-controls`.
 - [ ] `#player` overlays keep `z-index` ≤ the chrome layers (transport/HUD 20,
       rail 30, popovers 40).
-- [ ] Verify in **both** `/` (v2) and `/v3`.
+- [ ] Verify at `/` — it and `/v3` serve the same (and only) v3 shell.
+
+## Injecting into core shells (profile, dashboard)
+
+Core screens that accept plugin sections render **mount points** — usually
+empty, sometimes holding core's own **fallback content** (the Dashboard's
+career slot ships the plugin-count stat) — and announce each (re)build with a
+DOM event, because their `innerHTML` swap wipes anything previously injected.
+A plugin listens for the event and **replaces the mount's content** (never
+append — a fallback may be present) by id — the same seam every time:
+
+| Shell | Event | Mounts |
+| --- | --- | --- |
+| Profile | `v3:profile-rendered` | `#v3-profile-passports-mount` (career wall), `#v3-profile-feats-slot`, `#v3-profile-achievements-mount` |
+| Dashboard | `v3:dashboard-rendered` | `#v3-dash-career-slot` (career card; core's plugin-count stat is the fallback content a plugin may replace) |
+| Settings | `v3:settings-rendered` | per-plugin `settings.html` panels |
+
+Rules: inject on every event (the mount is fresh), keep the section
+**absent-not-empty** (no state → leave the mount alone / empty), and guard
+re-wired listeners with a `dataset` flag when your own refresh path can run
+against an unwiped mount.

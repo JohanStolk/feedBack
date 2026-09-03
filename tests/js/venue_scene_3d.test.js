@@ -9,6 +9,9 @@ const venueScene = require('../../static/v3/venue-scene-3d.js');
 const venueViz = require('../../static/v3/venue-viz.js');
 const pov = require('../../static/v3/venue-instrument-pov.js');
 const APP_JS = path.join(__dirname, '..', '..', 'static', 'app.js');
+// The viz layer (setViz / the venue option / the picker) was carved out of
+// app.js into its own module (R3a).
+const VIZ_JS = path.join(__dirname, '..', '..', 'static', 'js', 'viz.js');
 const H3D_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
 const INDEX_HTML = path.join(__dirname, '..', '..', 'static', 'v3', 'index.html');
 const ASSET_DIR = path.join(__dirname, '..', '..', 'static', 'assets', 'venue', 'themes', 'small-club');
@@ -185,8 +188,8 @@ test('venue-scene-3d exports bg plate asset ids', () => {
     assert.equal(venueScene.ASSET_BASE, '/static/assets/venue/themes/small-club/');
 });
 
-test('app.js syncs venue 3D scene on viz changes', () => {
-    const src = fs.readFileSync(APP_JS, 'utf8');
+test('viz.js syncs venue 3D scene on viz changes', () => {
+    const src = fs.readFileSync(VIZ_JS, 'utf8');
     assert.match(src, /v3VenueScene3d\.syncViz\('venue'\)/);
     assert.match(src, /v3VenueScene3d\.syncViz\(id\)/);
 });
@@ -205,7 +208,7 @@ test('index.html loads venue deps before venue-scene-3d', () => {
     assert.ok(vizIdx < moodIdx && moodIdx < sceneIdx);
 });
 
-test('syncViz activates only for venue visualization id', () => {
+test('syncViz activates only for venue visualization id, and only on the player', () => {
     global.h3dVenueSceneSetActive = (on) => { global._h3dActive = on; };
     global.h3dVenueSceneSetMood = (s) => { global._h3dMood = s; };
     global.h3dVenueSceneSetInstrumentPov = () => {};
@@ -213,7 +216,14 @@ test('syncViz activates only for venue visualization id', () => {
     global.v3VenueViz = venueViz;
     global.v3VenueInstrumentPov = pov;
     global.feedBack = { on() {} };
+    // The venue is scoped to the song player: selecting Venue is a preference
+    // for THAT screen, not a licence to paint the venue over anything else that
+    // borrows the highway_3d renderer (Virtuoso's practice charts did exactly
+    // that). syncViz therefore needs to know which screen is showing.
+    const onScreen = (id) => { global.document = { querySelector: (s) => (s === '.screen.active' && id ? { id } : null) }; };
+    const prevDoc = global.document;
     try {
+        onScreen('player');
         venueScene.deactivate();
         venueScene.syncViz('highway_3d');
         assert.equal(global._h3dActive, false);
@@ -221,7 +231,16 @@ test('syncViz activates only for venue visualization id', () => {
         assert.equal(global._h3dActive, true);
         assert.equal(venueScene.getState().active, true);
         assert.equal(venueScene.getState().themeId, 'small-club');
+
+        // ...and the same call OFF the player must not activate it.
+        venueScene.deactivate();
+        onScreen('virtuoso');
+        venueScene.syncViz('venue');
+        assert.equal(global._h3dActive, false,
+            'Venue selected must NOT paint the venue onto the Virtuoso highway');
+        assert.equal(venueScene.getState().active, false);
     } finally {
+        global.document = prevDoc;
         venueScene.deactivate();
         delete global.h3dVenueSceneSetActive;
         delete global.h3dVenueSceneSetMood;

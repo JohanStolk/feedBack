@@ -12,6 +12,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const highwayJs = path.join(__dirname, '..', '..', 'static', 'highway.js');
+// R3c: _noteState moved to static/js/highway-state-primitives.js and gained an explicit
+// hwState first parameter — it has to, because createHighway() is a factory and a module
+// cannot import per-instance state without two panels sharing it.
+const primitivesJs = path.join(__dirname, '..', '..', 'static', 'js', 'highway-state-primitives.js');
 const highway3dJs = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
 
 // Brace-balanced extraction (same helper shape as highway_visibility.test.js).
@@ -32,30 +36,53 @@ function extractBlock(src, signature) {
     return src.slice(start, i);
 }
 
+
+// R3c: highway.js is being carved into modules, so its source is no longer ONE file. Read the
+// whole set rather than re-pinning at whichever file currently holds a function — re-pinning
+// just breaks again next time, and a source-shape assertion that silently stops finding its
+// target is indistinguishable from one that passes.
+function highwaySources() {
+    const root = path.join(__dirname, '..', '..');
+    const jsDir = path.join(root, 'static', 'js');
+    const parts = [fs.readFileSync(path.join(root, 'static', 'highway.js'), 'utf8')];
+    for (const f of fs.readdirSync(jsDir).sort()) {
+        if (f.startsWith('highway-') && f.endsWith('.js')) parts.push(fs.readFileSync(path.join(jsDir, f), 'utf8'));
+    }
+    return parts.join('\n');
+}
+
 test('highway declares the note-state provider slot', () => {
-    const src = fs.readFileSync(highwayJs, 'utf8');
-    assert.match(src, /let\s+_noteStateProvider\s*=\s*null/, 'missing _noteStateProvider (provider slot, null = none)');
+    const src = highwaySources();
+    assert.match(src, /hwState\._noteStateProvider\s*=\s*null/, 'missing _noteStateProvider (provider slot, null = none)');
 });
 
 test('public API exposes setNoteStateProvider / getNoteStateProvider / getNoteState / isDefaultRenderer', () => {
-    const src = fs.readFileSync(highwayJs, 'utf8');
-    assert.match(src, /setNoteStateProvider\s*\(\s*fn\s*\)\s*\{[^}]*_noteStateProvider\s*=/, 'setNoteStateProvider must assign _noteStateProvider');
+    const src = highwaySources();
+    assert.match(src, /setNoteStateProvider\s*\(\s*fn\s*\)\s*\{[^}]*hwState\._noteStateProvider\s*=/, 'setNoteStateProvider must assign _noteStateProvider');
     assert.match(src, /setNoteStateProvider\s*\(\s*fn\s*\)\s*\{[^}]*typeof\s+fn\s*===\s*['"]function['"][^}]*:\s*null/, 'setNoteStateProvider must coerce non-functions (incl. null) to null');
-    assert.match(src, /getNoteStateProvider\s*\(\s*\)\s*\{\s*return\s+_noteStateProvider/, 'getNoteStateProvider must return the slot');
+    assert.match(src, /getNoteStateProvider\s*\(\s*\)\s*\{\s*return\s+hwState\._noteStateProvider/, 'getNoteStateProvider must return the slot');
     assert.match(src, /getNoteState\s*\(\s*note\s*,\s*chartTime\s*\)\s*\{\s*return\s+_noteState\s*\(/, 'getNoteState must delegate to _noteState');
-    assert.match(src, /isDefaultRenderer\s*\(\s*\)\s*\{\s*return\s+_renderer\s*===\s*_defaultRenderer\s*\|\|\s*_renderer\s*==\s*null/, 'isDefaultRenderer must be (_renderer === _defaultRenderer || _renderer == null)');
+    assert.match(src, /isDefaultRenderer\s*\(\s*\)\s*\{\s*return\s+hwState\._renderer\s*===\s*_defaultRenderer\s*\|\|\s*hwState\._renderer\s*==\s*null/, 'isDefaultRenderer must be (_renderer === _defaultRenderer || _renderer == null)');
 });
 
 test('_makeBundle exposes getNoteState (stable reference, no per-frame alloc)', () => {
-    const src = fs.readFileSync(highwayJs, 'utf8');
+    const src = highwaySources();
     const fn = extractBlock(src, 'function _makeBundle()');
     // The bundle field must point straight at _noteState — not a fresh
     // arrow each frame (the per-frame allocation the review flagged).
-    assert.match(fn, /getNoteState:\s*_noteState\b/, 'bundle.getNoteState must be the stable _noteState reference');
+    // R3c: _noteState now takes hwState first, so the bundle hands out a per-INSTANCE bound
+    // view created ONCE in the factory (boundNoteState) rather than the raw function. The
+    // contract that matters is unchanged and still asserted: ONE stable reference, never a
+    // fresh arrow per frame (feedBack#254). Assert it is a bare identifier, not an inline
+    // function expression.
+    assert.match(fn, /getNoteState\s*[:=]\s*(?:boundNoteState|_noteState)\b/,
+        'bundle.getNoteState must be a stable reference (a name), not a per-frame arrow');
+    assert.doesNotMatch(fn, /getNoteState\s*[:=]\s*(?:\(|function)/,
+        'bundle.getNoteState must NOT be a fresh function per frame');
 });
 
 test('_makeBundle exposes getNoteStateProvider as a stable reference (feedBack#254)', () => {
-    const src = fs.readFileSync(highwayJs, 'utf8');
+    const src = highwaySources();
     const fn = extractBlock(src, 'function _makeBundle()');
     // Same allocation discipline as getNoteState: highway_3d uses this
     // bundle field to tell "provider attached" from "no provider but
@@ -64,7 +91,7 @@ test('_makeBundle exposes getNoteStateProvider as a stable reference (feedBack#2
     // identity-based guards in renderer code.
     assert.match(
         fn,
-        /getNoteStateProvider:\s*_getNoteStateProvider\b/,
+        /getNoteStateProvider\s*[:=]\s*_getNoteStateProvider\b/,
         'bundle.getNoteStateProvider must be the stable _getNoteStateProvider reference (not a per-frame arrow)'
     );
     // Sanity: the stable accessor exists per-createHighway-instance
@@ -72,15 +99,15 @@ test('_makeBundle exposes getNoteStateProvider as a stable reference (feedBack#2
     // slot, so renderers see a live "is a provider registered?" view.
     assert.match(
         src,
-        /function\s+_getNoteStateProvider\s*\(\s*\)\s*\{\s*return\s+_noteStateProvider\s*;?\s*\}/,
+        /function\s+_getNoteStateProvider\s*\(\s*\)\s*\{\s*return\s+hwState\._noteStateProvider\s*;?\s*\}/,
         '_getNoteStateProvider must be defined as a stable named function returning _noteStateProvider'
     );
 });
 
 test('_noteState normalizes provider output as documented', () => {
-    const src = fs.readFileSync(highwayJs, 'utf8');
-    const fn = extractBlock(src, 'function _noteState(note, chartTime)');
-    assert.match(fn, /if\s*\(\s*!_noteStateProvider\s*\)\s*return\s+null/, 'must short-circuit when no provider is registered');
+    const src = highwaySources();
+    const fn = extractBlock(fs.readFileSync(primitivesJs, 'utf8'), 'function _noteState(hwState, note, chartTime)');
+    assert.match(fn, /if\s*\(\s*!hwState\._noteStateProvider\s*\)\s*return\s+null/, 'must short-circuit when no provider is registered');
     assert.match(fn, /try\s*\{[\s\S]*_noteStateProvider\s*\([\s\S]*catch[\s\S]*return\s+null/, 'must call the provider inside try/catch and return null on throw');
     assert.match(fn, /state\s*!==\s*['"]hit['"]\s*&&\s*state\s*!==\s*['"]active['"]\s*&&\s*state\s*!==\s*['"]miss['"]/, 'must reject states other than hit/active/miss');
     assert.match(fn, /Math\.max\(\s*0\s*,\s*Math\.min\(\s*1\s*,\s*raw\.alpha\s*\)\s*\)/, 'must clamp alpha to [0,1]');
@@ -90,12 +117,24 @@ test('_noteState normalizes provider output as documented', () => {
 });
 
 test('default 2D renderer threads note state into drawNote / drawSustains / chord path', () => {
-    const src = fs.readFileSync(highwayJs, 'utf8');
+    const src = highwaySources();
     // drawNote takes the trailing `ns` param.
-    assert.match(src, /function\s+drawNote\(\s*W\s*,\s*H\s*,\s*x\s*,\s*y\s*,\s*scale\s*,\s*string\s*,\s*fret\s*,\s*opts\s*,\s*ns\s*\)/, 'drawNote must accept the trailing ns param');
+    // R3c: drawNote moved to ./static/js/highway-draw.js and gained hwState as its FIRST arg
+    // (createHighway is a factory — a module cannot import per-instance state without two
+    // panels sharing it). The contract asserted here is unchanged: `ns` is still the TRAILING
+    // parameter, which is what the note-state threading depends on.
+    assert.match(src, /function\s+drawNote\(\s*hwState\s*,\s*W\s*,\s*H\s*,\s*x\s*,\s*y\s*,\s*scale\s*,\s*string\s*,\s*fret\s*,\s*opts\s*,\s*ns\s*\)/,
+        'drawNote must take hwState first and keep ns as the trailing param');
     // drawNotes / drawSustains / drawChords gate the lookup on the provider.
-    assert.match(src, /_noteStateProvider\s*\?\s*_noteState\(\s*n\s*,\s*n\.t\s*\)\s*:\s*null/, 'visible-note paths must skip the lookup when no provider is set');
-    assert.match(src, /_noteStateProvider\s*\?\s*_noteState\(\s*cn\s*,\s*ch\.t\s*\)\s*:\s*null/, 'chord-note path must key the lookup by the chord time and gate on the provider');
+    // R3c: _noteState gained an explicit hwState first arg (it lives in a module now, and
+    // createHighway is a factory). The CONTRACT here is unchanged and still the point: skip
+    // the lookup entirely when no provider is set — a per-visible-note call on every frame.
+    assert.match(src, /_noteStateProvider\s*\?\s*_noteState\(\s*hwState\s*,\s*n\s*,\s*n\.t\s*\)\s*:\s*null/,
+        'visible-note paths must skip the lookup when no provider is set');
+    // Same, for the chord path: keyed by the CHORD's time (ch.t), not the note's, and still
+    // gated on the provider. Only the hwState arg is new.
+    assert.match(src, /_noteStateProvider\s*\?\s*_noteState\(\s*hwState\s*,\s*cn\s*,\s*ch\.t\s*\)\s*:\s*null/,
+        'chord-note path must key the lookup by the chord time and gate on the provider');
 });
 
 test('3D highway captures bundle.getNoteState and overrides legacy hit/miss with the provider verdict', () => {

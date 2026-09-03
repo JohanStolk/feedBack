@@ -1,4 +1,4 @@
-// Behavioral tests for the JUCE engine-reroute watcher in static/app.js.
+// Behavioral tests for the JUCE engine-reroute watcher in static/js/juce-audio.js.
 //
 // The watcher (an IIFE, `_installJuceEngineRoutingWatcher`) migrates a loaded
 // song between the HTML5 <audio> element and the native JUCE backing transport
@@ -14,14 +14,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const APP_JS = path.join(__dirname, '..', '..', 'static', 'app.js');
+// The JUCE audio shims were carved out of app.js into their own module (R3a).
+const APP_JS = path.join(__dirname, '..', '..', 'static', 'js', 'juce-audio.js');
 
 // Brace-balanced extraction of the watcher IIFE, starting at its `(function`
 // and ending after the matching `})();`.
 function extractWatcherIIFE(src) {
     const marker = '(function _installJuceEngineRoutingWatcher() {';
     const start = src.indexOf(marker);
-    assert.ok(start !== -1, 'watcher IIFE not found in app.js');
+    assert.ok(start !== -1, 'watcher IIFE not found in static/js/juce-audio.js');
     const openBrace = src.indexOf('{', start);
     let depth = 1;
     let i = openBrace + 1;
@@ -40,7 +41,7 @@ function extractWatcherIIFE(src) {
 
 // Build a sandbox with fakes and run the watcher IIFE inside it. Returns the
 // sandbox so tests can drive window._reevaluateJuceRouting and inspect state.
-function makeSandbox({ isAudioRunning, loadBackingTrack }) {
+function makeSandbox({ isAudioRunning, loadBackingTrack, outputType = 'Windows Audio' }) {
     const calls = { loadBackingTrack: [], jucePlay: 0, jucePause: 0, audioPlay: 0 };
 
     const audio = {
@@ -65,6 +66,7 @@ function makeSandbox({ isAudioRunning, loadBackingTrack }) {
     const juceApi = {
         isAudioRunning: () => Promise.resolve(isAudioRunning()),
         loadBackingTrack: (p) => { calls.loadBackingTrack.push(p); return Promise.resolve(loadBackingTrack()); },
+        getCurrentDevice: () => Promise.resolve({ outputType: typeof outputType === 'function' ? outputType() : outputType }),
         getBackingDuration: () => Promise.resolve(180),
         seekBacking: () => Promise.resolve(),
         startBacking: () => Promise.resolve(),
@@ -83,7 +85,11 @@ function makeSandbox({ isAudioRunning, loadBackingTrack }) {
             json: () => Promise.resolve({ path: '/local/song.ogg' }),
         }),
         document: { hidden: false },
-        isPlaying: true,
+        // `isPlaying` moved onto the shared player-state container so a carved module
+        // can WRITE it (an imported binding is read-only). The sliced code now reads and
+        // writes S.isPlaying, so the sandbox provides the same container — the
+        // assertions below are unchanged.
+        S: { isPlaying: true, lastAudioTime: 0 },
         audio,
         jucePlayer,
         __calls: calls,
@@ -95,6 +101,17 @@ function makeSandbox({ isAudioRunning, loadBackingTrack }) {
 
     const src = fs.readFileSync(APP_JS, 'utf8');
     const iife = extractWatcherIIFE(src);
+    // The shims reach back into app.js through the host seam (static/js/host.js).
+    // Route it at the SAME stubs this sandbox already had — a fresh `() => {}` would
+    // swallow the calls and the assertions below would pass vacuously.
+    sandbox.host = {
+        jucePlayer: () => sandbox.jucePlayer,
+        playSong: (...a) => (sandbox.playSong ? sandbox.playSong(...a) : undefined),
+        _audioSeek: (...a) => (sandbox._audioSeek ? sandbox._audioSeek(...a) : Promise.resolve({ completed: true })),
+        setPlayButtonState: (...a) => (sandbox.setPlayButtonState ? sandbox.setPlayButtonState(...a) : undefined),
+        _songEventPayload: (...a) => (sandbox._songEventPayload ? sandbox._songEventPayload(...a) : ({})),
+        showScreen: (...a) => (sandbox.showScreen ? sandbox.showScreen(...a) : undefined),
+    };
     vm.createContext(sandbox);
     vm.runInContext(iife, sandbox);
     return sandbox;
@@ -150,6 +167,87 @@ test('non-JUCE-eligible song (sloppak stems) is never rerouted', async () => {
 
     assert.equal(sb.window._juceMode, false, 'stems stay on HTML5');
     assert.equal(sb.__calls.loadBackingTrack.length, 0);
+});
+
+test('feedpak full-mix + exclusive output → migrates to JUCE', async () => {
+    const sb = makeSandbox({
+        isAudioRunning: () => true,
+        loadBackingTrack: () => true,
+        outputType: 'Windows Audio (Exclusive Mode)',
+    });
+    sb.window._juceMode = false;
+    sb.window._currentSongAudio = {
+        url: '/api/sloppak/song.sloppak/file/stems/full.ogg',
+        juceEligible: false,
+        feedpakFullMix: true,
+    };
+
+    await sb.window._reevaluateJuceRouting();
+
+    assert.equal(sb.window._juceMode, true, 'feedpak full-mix rides the engine under exclusive output');
+    assert.equal(sb.__calls.loadBackingTrack.length, 1);
+});
+
+test('feedpak full-mix + ASIO output → migrates to JUCE', async () => {
+    const sb = makeSandbox({
+        isAudioRunning: () => true,
+        loadBackingTrack: () => true,
+        outputType: 'ASIO',
+    });
+    sb.window._juceMode = false;
+    sb.window._currentSongAudio = {
+        url: '/api/sloppak/song.sloppak/file/stems/full.ogg',
+        juceEligible: false,
+        feedpakFullMix: true,
+    };
+
+    await sb.window._reevaluateJuceRouting();
+
+    assert.equal(sb.window._juceMode, true, 'ASIO is exclusive-style; feedpak rides the engine');
+});
+
+test('feedpak full-mix + shared output → stays on HTML5 (stem mixer untouched)', async () => {
+    for (const shared of ['Windows Audio', 'Windows Audio (Low Latency Mode)', 'DirectSound']) {
+        const sb = makeSandbox({
+            isAudioRunning: () => true,
+            loadBackingTrack: () => true,
+            outputType: shared,
+        });
+        sb.window._juceMode = false;
+        sb.window._currentSongAudio = {
+            url: '/api/sloppak/song.sloppak/file/stems/full.ogg',
+            juceEligible: false,
+            feedpakFullMix: true,
+        };
+
+        await sb.window._reevaluateJuceRouting();
+
+        assert.equal(sb.window._juceMode, false, `stays on HTML5 for shared type "${shared}"`);
+        assert.equal(sb.__calls.loadBackingTrack.length, 0);
+    }
+});
+
+test('feedpak on JUCE + output leaves exclusive mode → migrates back to HTML5', async () => {
+    let type = 'Windows Audio (Exclusive Mode)';
+    const sb = makeSandbox({
+        isAudioRunning: () => true,
+        loadBackingTrack: () => true,
+        outputType: () => type,
+    });
+    const url = '/api/sloppak/song.sloppak/file/stems/full.ogg';
+    sb.window._juceMode = true;
+    sb.window._juceAudioUrl = url;
+    sb.window._currentSongAudio = { url, juceEligible: false, feedpakFullMix: true };
+
+    // Still exclusive: routing is consistent, no switch.
+    await sb.window._reevaluateJuceRouting();
+    assert.equal(sb.window._juceMode, true, 'consistent while exclusive');
+
+    // Device switched to shared mid-song: must return to HTML5.
+    type = 'Windows Audio';
+    await sb.window._reevaluateJuceRouting();
+    assert.equal(sb.window._juceMode, false, 'returned to HTML5 after leaving exclusive mode');
+    assert.equal(sb.audio.src, url, 'HTML5 element re-pointed at the song');
 });
 
 test('JUCE hard-reject is memoised → not retried on the next poll', async () => {

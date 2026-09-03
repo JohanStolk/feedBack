@@ -6,6 +6,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -16,6 +17,54 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from safepath import safe_join
 
 log = logging.getLogger("feedBack.plugins")
+
+
+def _plugin_media_type(path: Path) -> str:
+    """Best-effort Content-Type for a served plugin file. `.js`/`.css` must come
+    back as JavaScript/CSS so `<script type=module>` / `addModule()` / a `<link>`
+    accept them; `mimetypes.guess_type` can miss these on a stripped platform
+    registry, so fall back explicitly (mirrors the assets/ route)."""
+    media_type = mimetypes.guess_type(path.name)[0]
+    if media_type is None and path.suffix == ".js":
+        return "application/javascript"
+    if media_type is None and path.suffix == ".css":
+        return "text/css"
+    return media_type or "application/octet-stream"
+
+
+def _plugin_file_etag(path: Path) -> str | None:
+    """Weak ETag from mtime+size — cheap, stable across reads, changes on edit.
+    This is what makes the live-edit loop work for module graphs: a conditional
+    GET revalidates and 304s unchanged files on refresh instead of re-downloading
+    the whole `src/` tree. Returns None if the file can't be stat'd."""
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return f'W/"{st.st_mtime_ns:x}-{st.st_size:x}"'
+
+
+def _if_none_match(request: Request, etag: str) -> bool:
+    """True when the client's If-None-Match already holds `etag`."""
+    # ponytail: we serve one weak ETag; the browser echoes it back verbatim, so
+    # a direct compare is enough (comma-split tolerates a proxy concatenation).
+    return etag in [t.strip() for t in request.headers.get("if-none-match", "").split(",")]
+
+
+def _plugin_file_response(request: Request, path: Path, media_type: str) -> Response:
+    """Serve a plugin source/asset file with the live-edit cache contract:
+    `Cache-Control: no-cache` (browser may store but MUST revalidate) + a weak
+    ETag, and a bodyless 304 when the client's If-None-Match already matches.
+    Starlette's `FileResponse` emits an ETag but never evaluates If-None-Match
+    itself, so the conditional handling has to live here."""
+    headers = {"Cache-Control": "no-cache"}
+    etag = _plugin_file_etag(path)
+    if etag:
+        headers["ETag"] = etag
+        if _if_none_match(request, etag):
+            return Response(status_code=304, headers=headers)
+    # FileResponse sets etag/last-modified via setdefault, so the ETag above wins.
+    return FileResponse(path, media_type=media_type, headers=headers)
 
 
 PLUGINS_DIR = Path(__file__).parent
@@ -1350,6 +1399,13 @@ def load_plugins(app: FastAPI, context: dict, progress_cb=None, route_setup_fn=N
                     _icon = "assets/thumb.png"
             except OSError:
                 _icon = None
+        # Immersive (full-screen) screen opt-in. A plugin that declares a
+        # top-level `"fullscreen": true` gets the whole content area when its
+        # screen is active: the v3 shell hides the topbar and collapses the
+        # sidebar to an icon rail (see static/v3/shell.js + v3.css). For
+        # DAW-style plugin UIs that need the viewport, not a scrolling content
+        # page. Strict `is True` so a stray truthy value can't silently opt in.
+        _fullscreen = manifest.get("fullscreen") is True
         return {
             "id": plugin_id,
             "name": manifest.get("name", plugin_id),
@@ -1366,8 +1422,17 @@ def load_plugins(app: FastAPI, context: dict, progress_cb=None, route_setup_fn=N
             "version": manifest.get("version"),
             "has_screen": bool(manifest.get("screen")),
             "has_script": bool(manifest.get("script")),
+            # Module-migration (R0): `scriptType:"module"` tells the loader to
+            # inject screen.js as <script type="module">; `minHost` is the
+            # min core version a migrated plugin needs (passthrough only in R0 —
+            # enforcement is deferred to R4, master §4b). None when unset.
+            "script_type": manifest.get("scriptType"),
+            "min_host": manifest.get("minHost"),
             "has_settings": bool(manifest.get("settings")),
             "settings_category": _settings_category,
+            # Drives the v3 shell's immersive (full-screen) mode for this
+            # plugin's screen. False unless the manifest declares it explicitly.
+            "fullscreen": _fullscreen,
             "has_tour": _is_valid_tour_manifest(manifest.get("tour")),
             # `styles` is an optional relpath (under the plugin's assets/) to a
             # compiled, preflight-off stylesheet the frontend injects as a
@@ -2079,7 +2144,14 @@ def register_plugin_api(app: FastAPI):
                 "fallback": p.get("fallback", False),
                 "has_screen": p["has_screen"],
                 "has_script": p["has_script"],
+                # Module-migration passthrough (R0). Re-read from the manifest
+                # like `version` above so stubbed test entries (built without
+                # _nav_entry) don't need the key.
+                "script_type": (p.get("_manifest") or {}).get("scriptType"),
+                "min_host": (p.get("_manifest") or {}).get("minHost"),
                 "has_settings": p["has_settings"],
+                # v3 immersive screen opt-in (full-screen plugin UI).
+                "fullscreen": p.get("fullscreen", False),
                 # Settings-tab placement; None when the manifest's `settings`
                 # is absent, a bare string, or omits `category`.
                 "settings_category": p.get("settings_category"),
@@ -2130,8 +2202,12 @@ def register_plugin_api(app: FastAPI):
                 "fallback": False,
                 "has_screen": e.get("has_screen", False),
                 "has_script": e.get("has_script", False),
+                # Pending entries come from _nav_entry, so they carry these.
+                "script_type": e.get("script_type"),
+                "min_host": e.get("min_host"),
                 "has_settings": e.get("has_settings", False),
                 "settings_category": e.get("settings_category"),
+                "fullscreen": e.get("fullscreen", False),
                 "has_tour": e.get("has_tour", False),
                 "has_styles": e.get("has_styles", False),
                 "styles": e.get("styles"),
@@ -2294,7 +2370,7 @@ def register_plugin_api(app: FastAPI):
         return HTMLResponse("", status_code=404)
 
     @app.get("/api/plugins/{plugin_id}/screen.js")
-    def plugin_screen_js(plugin_id: str):
+    def plugin_screen_js(request: Request, plugin_id: str):
         with PLUGINS_LOCK:
             snapshot = list(LOADED_PLUGINS)
         for p in snapshot:
@@ -2302,9 +2378,59 @@ def register_plugin_api(app: FastAPI):
                 if p.get("status", "ready") != "ready":
                     break
                 script_file = p["_dir"] / p["_manifest"].get("script", "screen.js")
-                if script_file.exists():
-                    return Response(script_file.read_text(encoding="utf-8"), media_type="application/javascript")
+                if script_file.is_file():
+                    # no-cache + ETag/304 so an edited screen.js reloads on
+                    # refresh while an unchanged one revalidates cheaply — the
+                    # same live-edit contract the src/ module graph relies on.
+                    return _plugin_file_response(request, script_file, "application/javascript")
         return Response("", status_code=404)
+
+    # ── Module-graph cache busting (#879) ────────────────────────────────
+    #
+    # ES modules are evaluated ONCE PER URL PER DOCUMENT. Re-inserting a
+    # <script type="module"> whose src the module map has already seen fires
+    # `load` but does NOT re-run the body. So re-loading a plugin — a rollback,
+    # and (see below) an upgrade too — silently kept the OLD module live while
+    # the loader recorded success: a no-op that reported it worked.
+    #
+    # Busting the ENTRY url does not help. A module plugin's screen.js is a
+    # one-line `import './src/main.js'`, and a relative specifier resolves
+    # against the base URL WITH THE QUERY DROPPED — so a ?v= token never reaches
+    # the graph. Driving a real browser through install -> upgrade -> rollback and
+    # counting evaluations of src/main.js gives ONE. The upgrade re-runs the shim
+    # at its new ?v= URL; the shim imports './src/main.js'; that resolves to the
+    # same URL; the module map returns the already-evaluated old module.
+    #
+    # So the token goes in the PATH: /api/plugins/<id>/g/<n>/screen.js. Every
+    # relative import inherits it at every depth — for free, with no
+    # import-specifier rewriting (which could never see `import(expr)` anyway).
+    #
+    # WHY A PATH REWRITE AND NOT TWO MIRRORED ROUTES. The token shifts the base
+    # URL, so EVERYTHING a module resolves relatively moves with it — not just
+    # imports. `new URL('../assets/worklet.js', import.meta.url)` from
+    # /api/plugins/x/g/1/src/main.js resolves to /api/plugins/x/g/1/assets/... .
+    # Mirroring only screen.js and src/ would fix imports and 404 every asset,
+    # worklet and wasm file the graph reaches — and would silently break again the
+    # next time someone adds a plugin route. Stripping the segment before routing
+    # makes every plugin route, present and future, work under the prefix.
+    #
+    # The token is opaque: it is never joined into a filesystem path (and is gone
+    # by the time any handler runs), so containment still rests entirely on the
+    # same safe_join the un-prefixed routes use.
+    _GEN_PREFIX = re.compile(r"^(/api/plugins/[^/]+)/g/[^/]+(/.+)$")
+
+    @app.middleware("http")
+    async def _strip_plugin_generation_prefix(request: Request, call_next):
+        m = _GEN_PREFIX.match(request.scope.get("path", ""))
+        if m:
+            # Starlette routes on scope["path"] alone. raw_path is deliberately left
+            # ALONE: it is informational, and re-encoding the rewritten str back to
+            # bytes would have to guess a codec — `.encode("latin-1")` raises
+            # UnicodeEncodeError on a perfectly valid plugin file like src/工具.js,
+            # 500ing a request the un-prefixed route serves fine. Leaving raw_path as
+            # the client actually sent it is also simply more truthful for logs.
+            request.scope["path"] = m.group(1) + m.group(2)
+        return await call_next(request)
 
     @app.get("/api/plugins/{plugin_id}/settings.html")
     def plugin_settings_html(plugin_id: str):
@@ -2364,7 +2490,7 @@ def register_plugin_api(app: FastAPI):
         return Response("{}", status_code=404, media_type="application/json")
 
     @app.get("/api/plugins/{plugin_id}/assets/{asset_path:path}")
-    def plugin_asset(plugin_id: str, asset_path: str):
+    def plugin_asset(request: Request, plugin_id: str, asset_path: str):
         """Serve a static file a plugin bundles under its own ``assets/``
         directory (e.g. an AudioWorklet module, WASM, or image). Unlike the
         fixed screen.js/settings.html handlers above, this is a generic
@@ -2386,16 +2512,35 @@ def register_plugin_api(app: FastAPI):
                     log.warning("Plugin %r: asset path rejected: %r", plugin_id, asset_path)
                     break
                 if target.is_file():
-                    media_type = mimetypes.guess_type(target.name)[0]
-                    # .js must come back as JavaScript so addModule() / <script>
-                    # accept it; guess_type can miss this on some platforms.
-                    if media_type is None and target.suffix == ".js":
-                        media_type = "application/javascript"
-                    # .css must come back as text/css so a <link rel=stylesheet>
-                    # (the styles capability) is honoured; guess_type can miss it
-                    # on a stripped platform mimetypes registry, same as .js.
-                    elif media_type is None and target.suffix == ".css":
-                        media_type = "text/css"
-                    return FileResponse(target, media_type=media_type or "application/octet-stream")
+                    # no-cache + ETag/304 so a live-edited worklet/asset reloads
+                    # on refresh (bare FileResponse emits an ETag but never 304s).
+                    return _plugin_file_response(request, target, _plugin_media_type(target))
+                break
+        return Response("", status_code=404)
+
+    @app.get("/api/plugins/{plugin_id}/src/{src_path:path}")
+    def plugin_src(request: Request, plugin_id: str, src_path: str):
+        """Serve a file from a plugin's ES-module source tree under ``src/``.
+
+        This is the R0 host capability that lets a migrated plugin's
+        ``screen.js`` (a one-line ``import './src/main.js'``) load its whole
+        module graph. Containment mirrors the assets/ route exactly —
+        ``safe_join`` against ``<plugin>/src`` rejects ``..``, absolute paths,
+        and NUL bytes — and the live-edit cache contract (no-cache + ETag/304)
+        makes an edited module reload on refresh while unchanged ones 304.
+        Read-only; the src/ tree is source files, never executed server-side.
+        """
+        with PLUGINS_LOCK:
+            snapshot = list(LOADED_PLUGINS)
+        for p in snapshot:
+            if p["id"] == plugin_id:
+                if p.get("status", "ready") != "ready":
+                    break
+                target = safe_join(p["_dir"] / "src", src_path)
+                if target is None:
+                    log.warning("Plugin %r: src path rejected: %r", plugin_id, src_path)
+                    break
+                if target.is_file():
+                    return _plugin_file_response(request, target, _plugin_media_type(target))
                 break
         return Response("", status_code=404)

@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <!--
-  fee[dB]ack v0.3.0 shell (FEEDBACK_UI=v3 / GET /v3).
+  fee[dB]ack v0.3.0 shell — the app's only UI, served at `/` (and `/v3`, a
+  back-compat alias). The classic v2 shell it was forked from is deleted.
 
-  This is a re-chromed copy of the legacy static/index.html: the v0.3.0
-  sidebar + topbar replace the (hidden) legacy navbar, new #v3-* screens are
-  added, and all the legacy screens (#home library, #favorites, #settings,
-  #player, #audio, plugin nav containers) are kept verbatim so static/app.js
-  boots UNMODIFIED and the whole engine — player/highway, plugin loader,
-  capabilities, audio, library, settings — is reused as-is. Navigation is the
-  shared window.showScreen across both #v3-* and legacy/#plugin-* screens.
+  Originally a re-chromed copy of that shell: the v0.3.0 sidebar + topbar
+  replace the (hidden) legacy navbar, new #v3-* screens are added, and all the
+  legacy screens (#home library, #favorites, #settings, #player, #audio, plugin
+  nav containers) are kept verbatim so static/app.js boots UNMODIFIED and the
+  whole engine — player/highway, plugin loader, capabilities, audio, library,
+  settings — is reused as-is. Navigation is the shared window.showScreen across
+  both #v3-* and legacy/#plugin-* screens.
   See ~/Repositories/feedBack-feedback-v030/prompts/12-app-shell.md.
 -->
 <html lang="en" class="dark scroll-smooth">
@@ -60,6 +61,24 @@
             } catch (_) { /* file:// or sandboxed iframe */ }
         })();
     </script>
+    <!-- Interface size (Accessibility): apply the saved UI scale to the root
+         font-size BEFORE any stylesheet paints, so there is no flash-of-reflow
+         on load. Mirrors capabilities/interface-scale.js, which is the
+         authoritative owner and re-applies once it parses. Relative % (never a
+         px literal) so a raised browser/OS base font size is respected. -->
+    <script>
+        (function () {
+            try {
+                var raw = localStorage.getItem('v3-interface-scale');
+                if (raw == null) return;
+                var v = Math.min(1.5, Math.max(0.85, parseFloat(raw)));
+                if (!isFinite(v) || Math.abs(v - 1) < 0.001) return;
+                var el = document.documentElement;
+                el.style.setProperty('--fb-scale', String(v));
+                el.style.fontSize = (v * 100).toFixed(2) + '%';
+            } catch (_) { /* file:// or private mode */ }
+        })();
+    </script>
     <!-- fee[dB]ack mark (the [dB] motif). SVG primary, PNG fallback. -->
     <link rel="icon" type="image/svg+xml" href="/static/v3/brand/favicon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/v3/brand/favicon-32.png">
@@ -80,21 +99,44 @@
     <link rel="stylesheet" href="/static/tour-engine.css">
     <!-- v0.3.0 shell styles (radial-gradient bg, custom scrollbars). -->
     <link rel="stylesheet" href="/static/v3/v3.css">
+    <!-- Detachable panes: the pop-out chip, the dock, and the widgets built-in
+         panes render with. Hand-authored (not Tailwind-scanned) so a
+         runtime-installed plugin can use the chip without shipping its own CSS. -->
+    <link rel="stylesheet" href="/static/panes/panes.css">
+    <!-- EVERY external script below is `defer`. Do not add a plain one.
+         `defer` and `type="module"` scripts share a single "execute after
+         parsing" list and run in DOCUMENT ORDER; a plain classic script runs
+         DURING parse, ahead of all of them. So one plain tag would jump the
+         queue — and once the capabilities become modules (they defer), a
+         still-plain app.js would run BEFORE the bus exists and die on its
+         top-level `window.feedBack.on(...)` calls. Keeping every tag deferred
+         is what preserves this file's order through the ES-module migration.
+         Enforced by test_every_external_script_defers_so_document_order_is_execution_order.
+
+         The scripts themselves boot on DOMContentLoaded, which fires only after
+         all of the above have evaluated — that is what lets a script's boot()
+         use a global another script defines further down this list (there are
+         ~43 such forward references). Their readyState guards therefore treat
+         'interactive' as not-ready; see the note at each one. -->
+
     <!-- Diagnostics console capture must wrap console.* before any other
          script logs anything; load it as early as possible. See
          docs/diagnostics-bundle-spec.md (feedBack#166). -->
-    <script src="/static/diagnostics.js"></script>
-    <script src="/static/capabilities.js"></script>
-    <script src="/static/capabilities/library.js"></script>
-    <script src="/static/capabilities/tuning.js"></script>
-    <script src="/static/capabilities/audio-session.js"></script>
-    <script src="/static/capabilities/audio-effects.js"></script>
-    <script src="/static/capabilities/playback.js"></script>
+    <script defer src="/static/diagnostics.js"></script>
+    <script type="module" src="/static/capabilities.js"></script>
+    <script type="module" src="/static/capabilities/library.js"></script>
+    <script type="module" src="/static/capabilities/tuning.js"></script>
+    <script type="module" src="/static/capabilities/working-tuning.js"></script>
+    <script type="module" src="/static/capabilities/audio-session.js"></script>
+    <script type="module" src="/static/capabilities/audio-effects.js"></script>
+    <script type="module" src="/static/capabilities/playback.js"></script>
     <!-- fee[dB]ack v0.3.0: ui.library-card-injection capability (plugin card actions). -->
-    <script src="/static/capabilities/library-card-actions.js"></script>
-    <script src="/static/capabilities/visualization.js"></script>
-    <script src="/static/capabilities/note-detection.js"></script>
-    <script src="/static/capabilities/midi-input.js"></script>
+    <script type="module" src="/static/capabilities/library-card-actions.js"></script>
+    <script type="module" src="/static/capabilities/visualization.js"></script>
+    <script type="module" src="/static/capabilities/chart-transform.js"></script>
+    <script type="module" src="/static/capabilities/note-detection.js"></script>
+    <script type="module" src="/static/capabilities/midi-input.js"></script>
+    <script type="module" src="/static/capabilities/interface-scale.js"></script>
 </head>
 <body class="h-screen flex overflow-hidden bg-fb-sidebar text-fb-text font-display">
 
@@ -102,7 +144,7 @@
          the inline brand is the no-JS fallback. -->
     <aside id="v3-sidebar" class="w-64 border-r border-fb-border/50 flex-col shrink-0 hidden md:flex">
         <div id="v3-brand" class="p-6">
-            <span class="font-extrabold tracking-tight text-fb-text text-xl">fee<span class="text-fb-primary">[dB]</span>ack</span>
+            <img src="/static/v3/brand/feedback-logo-light.png" alt="fee[dB]ack" style="width:100%;height:auto;display:block">
         </div>
         <nav id="v3-nav" class="flex-1 overflow-y-auto px-3 pb-6 space-y-6" aria-label="Primary"></nav>
     </aside>
@@ -174,7 +216,7 @@
 
     <!-- Hidden file input shared by the navbar "Upload" link. Kept at body
          level so it stays reachable regardless of which screen is active. -->
-    <input type="file" id="upload-songs-file" accept=".sloppak" multiple class="hidden" onchange="uploadSongs(this.files); this.value=''">
+    <input type="file" id="upload-songs-file" accept=".feedpak,.sloppak" multiple class="hidden" onchange="uploadSongs(this.files); this.value=''">
 
     <!-- ══ HOME (Hero + Library) — reused as the v3 "Songs" screen ════════ -->
     <div id="home" class="screen">
@@ -285,7 +327,7 @@
                 <section>
                     <details>
                         <summary class="cursor-pointer flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
-                            <span>Tuning</span>
+                            <span id="filter-tunings-label">Tuning</span>
                             <span id="filter-tunings-summary" class="text-gray-600 normal-case font-normal text-xs">All tunings</span>
                         </summary>
                         <div id="filter-tunings" class="mt-3 space-y-1 max-h-64 overflow-y-auto pr-1"></div>
@@ -343,7 +385,10 @@
 
     <!-- ══ SETTINGS ═══════════════════════════════════════════════════════ -->
     <div id="settings" class="screen">
-        <div class="fb-settings">
+        <!-- fb-selectable: Settings is read-only content (paths, device names,
+             version, diagnostics, About) the user copies — opt the whole panel
+             back in under the v3 non-select default. See static/v3/v3.css. -->
+        <div class="fb-settings fb-selectable">
             <button onclick="showScreen('home')" class="fb-settings-back">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg> Home
             </button>
@@ -355,6 +400,7 @@
                  panels (manifest settings.category routes the others). -->
             <div class="fb-tabbar" id="settings-tabbar">
                 <button type="button" class="fb-tab" data-tab="gameplay">Gameplay</button>
+                <button type="button" class="fb-tab" data-tab="accessibility">Accessibility</button>
                 <button type="button" class="fb-tab" data-tab="audio">Audio</button>
                 <button type="button" class="fb-tab" data-tab="graphics">Graphics</button>
                 <button type="button" class="fb-tab" data-tab="keybinds">Keybinds</button>
@@ -402,6 +448,23 @@
                                 <option value="Lead">Lead</option>
                                 <option value="Rhythm">Rhythm</option>
                                 <option value="Bass">Bass</option>
+                            </select>
+                        </div>
+                    </div>
+                    <!-- Instrument pathway -->
+                    <div class="fb-srow">
+                        <span class="fb-srow-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-1.447-.894L15 4m0 13V4m0 0L9 7"/></svg></span>
+                        <div class="fb-srow-main">
+                            <div class="fb-srow-title">Instrument pathway</div>
+                            <div class="fb-srow-desc">Preferred path for the selected instrument. This is remembered per instrument profile.</div>
+                        </div>
+                        <div class="fb-srow-control">
+                            <select id="setting-instrument-pathway" onchange="setInstrumentPathway(this.value)"
+                                class="bg-dark-700 border border-gray-800 rounded-xl px-3 py-2.5 text-sm text-gray-300 outline-none">
+                                <option value="songs">Songs</option>
+                                <option value="practice">Practice</option>
+                                <option value="learn">Learn</option>
+                                <option value="studio">Studio</option>
                             </select>
                         </div>
                     </div>
@@ -505,6 +568,68 @@
                             </label>
                         </div>
                     </div>
+                    <!-- "Up Next" pill -->
+                    <div class="fb-srow">
+                        <span class="fb-srow-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7"/></svg></span>
+                        <div class="fb-srow-main">
+                            <div class="fb-srow-title">Show &ldquo;Up Next&rdquo;</div>
+                            <div class="fb-srow-desc">Display the upcoming-section pill in the top-right of the player during playback.</div>
+                        </div>
+                        <div class="fb-srow-control">
+                            <label class="fb-switch">
+                                <input type="checkbox" id="setting-show-upnext" checked onchange="setShowUpNext(this.checked)">
+                                <span class="fb-switch-track"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <!-- Ask before leaving a song -->
+                    <div class="fb-srow">
+                        <span class="fb-srow-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg></span>
+                        <div class="fb-srow-main">
+                            <div class="fb-srow-title">Ask before leaving a song</div>
+                            <div class="fb-srow-desc">Confirm before Escape (or the player&rsquo;s ✕) exits a song. Off by default &mdash; Escape leaves instantly. With it on, a confirm appears; Space, Enter, or &ldquo;Leave&rdquo; exits, while Escape dismisses it.</div>
+                        </div>
+                        <div class="fb-srow-control">
+                            <label class="fb-switch">
+                                <input type="checkbox" id="setting-confirm-exit" onchange="setConfirmExitSong(this.checked)">
+                                <span class="fb-switch-track"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ══ ACCESSIBILITY ═══════════════════════════════════════════ -->
+            <div class="fb-tabpanel" data-tab="accessibility">
+                <div class="fb-tabpanel-head"><h3>Accessibility</h3></div>
+                <div class="fb-srows">
+                    <!-- Interface size -->
+                    <div class="fb-srow fb-srow-stack">
+                        <div style="display:flex; align-items:center; gap:1rem;">
+                            <span class="fb-srow-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7V5a1 1 0 011-1h14a1 1 0 011 1v2M9 20h6M12 4v16"/></svg></span>
+                            <div class="fb-srow-main">
+                                <div class="fb-srow-title">Interface size</div>
+                                <div class="fb-srow-desc">Make the app&rsquo;s menus, buttons and text larger or smaller. This changes the <strong>app interface</strong> &mdash; not the notes on the note highway (set those under <strong>Graphics</strong>). On desktop you can also press <strong>Ctrl&nbsp;+</strong> / <strong>Ctrl&nbsp;&minus;</strong> to zoom the whole window.</div>
+                            </div>
+                        </div>
+                        <div class="fb-seg" id="setting-interface-size" role="group" aria-label="Interface size">
+                            <button type="button" class="fb-seg-btn" data-scale="0.90" aria-pressed="false" onclick="window.feedBack.scale.set(0.90)">Small</button>
+                            <button type="button" class="fb-seg-btn" data-scale="1.00" aria-pressed="false" onclick="window.feedBack.scale.set(1.00)">Medium</button>
+                            <button type="button" class="fb-seg-btn" data-scale="1.15" aria-pressed="false" onclick="window.feedBack.scale.set(1.15)">Large</button>
+                            <button type="button" class="fb-seg-btn" data-scale="1.30" aria-pressed="false" onclick="window.feedBack.scale.set(1.30)">Extra&nbsp;Large</button>
+                        </div>
+                        <p class="fb-srow-desc" style="margin-top:.55rem;">Larger sizes are recommended for large or high-resolution displays.</p>
+                        <details class="fb-finetune">
+                            <summary>Fine-tune size</summary>
+                            <div class="fb-finetune-body">
+                                <input type="range" id="setting-interface-size-slider" min="85" max="150" step="5" value="100"
+                                    oninput="window.feedBack.scale.set(this.value / 100, { persist: false })"
+                                    onchange="window.feedBack.scale.set(this.value / 100)" class="fb-srow-wide slider-input"
+                                    aria-label="Interface size percent">
+                                <span class="fb-seg-val"><span id="setting-interface-size-val">100</span>%</span>
+                            </div>
+                        </details>
+                    </div>
                 </div>
             </div>
 
@@ -538,7 +663,12 @@
                             </div>
                         </div>
                         <div class="fb-srow-control">
+                            <!-- Autosave on blur/enter via a single-key POST (like every other v3
+                                 setting), so setting the address never depends on the shared Save
+                                 button — whose bundled dlc_dir could otherwise block it. Save button
+                                 kept for discoverability. -->
                             <input type="text" id="demucs-server-url" placeholder="http://192.168.1.100:7865"
+                                onchange="persistSetting('demucs_server_url', this.value.trim())"
                                 class="bg-dark-700 border border-gray-800 rounded-xl px-4 py-2.5 text-sm text-gray-300 placeholder-gray-600 focus:border-accent/50 outline-none">
                             <button onclick="saveSettings()" class="bg-accent hover:bg-accent-light px-6 py-2.5 rounded-xl text-sm font-semibold text-white transition">Save</button>
                         </div>
@@ -612,6 +742,7 @@
                                 <option value="rc">Release candidate</option>
                                 <option value="beta">Beta</option>
                                 <option value="alpha">Alpha</option>
+                                <option value="nightly">Nightly</option>
                             </select>
                             <button id="app-update-check-now"
                                 class="bg-accent hover:bg-accent-light px-4 py-2.5 rounded-xl text-sm font-medium text-white transition disabled:opacity-50">
@@ -620,9 +751,24 @@
                         </div>
                         <p id="app-update-status" class="text-xs text-gray-500 fb-srow-wide">Loading updater status…</p>
                         <p id="app-update-linux-note" class="hidden text-xs text-yellow-300 fb-srow-wide">
-                            Auto-update is not available on Linux —
-                            <a href="https://github.com/got-feedback/feedback-desktop/releases" target="_blank" rel="noopener" class="text-accent hover:text-accent-light underline">download new versions from GitHub Releases</a>.
+                            Auto-update on Linux only works for the AppImage build on the Nightly channel —
+                            <a href="https://github.com/got-feedBack/feedBack-desktop/releases" target="_blank" rel="noopener" class="text-accent hover:text-accent-light underline">download other versions from GitHub Releases</a>.
                         </p>
+                    </div>
+                    <!-- Window options — desktop-only; setupWindowOptions() unhides. -->
+                    <div id="window-options-block" class="hidden">
+                        <div class="fb-srow">
+                            <div class="fb-srow-main">
+                                <div class="fb-srow-title">Fullscreen</div>
+                                <div class="fb-srow-desc">Run fee[dB]ack in fullscreen mode. On macOS, changes take effect on the next launch.</div>
+                            </div>
+                            <div class="fb-srow-control">
+                                <label class="fb-switch">
+                                    <input type="checkbox" id="setting-start-fullscreen">
+                                    <span class="fb-switch-track"></span>
+                                </label>
+                            </div>
+                        </div>
                     </div>
                     <!-- Library folder path -->
                     <div class="fb-srow fb-srow-stack">
@@ -647,6 +793,76 @@
                             <button onclick="rescanLibrary()" id="btn-rescan" class="bg-dark-600 hover:bg-dark-500 px-5 py-2.5 rounded-xl text-sm text-gray-300 transition">Rescan Library</button>
                             <button onclick="fullRescanLibrary()" id="btn-full-rescan" class="bg-dark-600 hover:bg-red-900/30 px-5 py-2.5 rounded-xl text-sm text-gray-400 transition">Full Rescan</button>
                             <span id="rescan-status" class="text-xs text-gray-500"></span>
+                        </div>
+                    </div>
+                    <!-- Metadata matching (P8 — wired by static/v3/match-review.js) -->
+                    <div class="fb-srow fb-srow-stack">
+                        <div class="fb-srow-main">
+                            <div class="fb-srow-title">Metadata matching</div>
+                            <div class="fb-srow-desc">Matches your charts against MusicBrainz in the background to tidy names, years and genres — display only, your files are never modified. Matches at or above the confidence level apply automatically; the rest wait in the library's review queue. Turning this off never disables manual match fixes.</div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 mb-1 text-xs text-gray-400 fb-srow-wide">
+                            <label class="flex items-center gap-2"><input type="checkbox" id="enrich-enabled" checked class="rounded border-gray-600 bg-dark-700 text-accent"> Match songs automatically</label>
+                            <label class="flex items-center gap-2">Auto-apply confidence
+                                <select id="enrich-threshold" class="bg-dark-700 border border-gray-800 rounded-xl px-2 py-1.5 text-xs text-gray-300 outline-none">
+                                    <option value="0.85">85% — more auto-matches</option>
+                                    <option value="0.9" selected>90% (recommended)</option>
+                                    <option value="0.95">95% — cautious</option>
+                                    <option value="1.01">Always review</option>
+                                </select>
+                            </label>
+                        </div>
+                        <!-- R1 scraper options: sources (who may be contacted) ×
+                             auto-apply fields (what a confident match fills in). -->
+                        <div class="fb-srow-wide mb-1">
+                            <div class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Sources</div>
+                            <div class="grid grid-cols-2 gap-2 text-xs text-gray-400">
+                                <label class="flex items-center gap-2"><input type="checkbox" id="enrich-src-musicbrainz" checked class="rounded border-gray-600 bg-dark-700 text-accent"> MusicBrainz — names, years, genres</label>
+                                <label class="flex items-center gap-2"><input type="checkbox" id="enrich-src-caa" checked class="rounded border-gray-600 bg-dark-700 text-accent"> Cover Art Archive — album covers</label>
+                            </div>
+                        </div>
+                        <div class="fb-srow-wide mb-1">
+                            <div class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Auto-apply</div>
+                            <div class="grid grid-cols-4 gap-2 text-xs text-gray-400">
+                                <label class="flex items-center gap-2"><input type="checkbox" id="enrich-apply-names" checked class="rounded border-gray-600 bg-dark-700 text-accent"> Names</label>
+                                <label class="flex items-center gap-2"><input type="checkbox" id="enrich-apply-year" checked class="rounded border-gray-600 bg-dark-700 text-accent"> Year</label>
+                                <label class="flex items-center gap-2"><input type="checkbox" id="enrich-apply-genres" checked class="rounded border-gray-600 bg-dark-700 text-accent"> Genres</label>
+                                <label class="flex items-center gap-2"><input type="checkbox" id="enrich-apply-art" checked class="rounded border-gray-600 bg-dark-700 text-accent"> Cover art</label>
+                            </div>
+                            <div class="text-[11px] text-gray-600 mt-1">What a confident match may fill in on its own — matches you confirm in the review queue always apply in full.</div>
+                        </div>
+                        <!-- Audio fingerprint (AcoustID) — opt-in, default OFF. Wired by match-review.js. -->
+                        <div class="fb-srow-wide mb-1">
+                            <div class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Audio fingerprint (AcoustID)</div>
+                            <label class="flex items-center gap-2 text-xs text-gray-400 mb-1"><input type="checkbox" id="acoustid-enabled" class="rounded border-gray-600 bg-dark-700 text-accent"> Identify by audio — reads the recording itself for the exact version (studio vs live/extended)</label>
+                            <input type="text" id="acoustid-api-key" placeholder="AcoustID application key" class="w-full bg-dark-700 border border-gray-800 rounded-xl px-2 py-1.5 text-xs text-gray-300 outline-none">
+                            <div class="text-[11px] text-gray-600 mt-1">Opt-in. Get a free key at acoustid.org/new-application; the fpcalc (Chromaprint) binary must be on the server's PATH.</div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 mb-1 text-xs text-gray-400 fb-srow-wide">
+                            <label class="flex items-center gap-2">Review queue order
+                                <select id="enrich-review-order" class="bg-dark-700 border border-gray-800 rounded-xl px-2 py-1.5 text-xs text-gray-300 outline-none">
+                                    <option value="missing_first" selected>Missing info first</option>
+                                    <option value="artist">Artist A–Z</option>
+                                    <option value="recent">Recently added</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="fb-srow-control">
+                            <button id="enrich-match-now" class="bg-dark-600 hover:bg-dark-500 px-5 py-2.5 rounded-xl text-sm text-gray-300 transition">Match Now</button>
+                            <span id="enrich-status" class="text-xs text-gray-500"></span>
+                        </div>
+                    </div>
+                    <!-- Artist pages (PR-B — wired by static/v3/match-review.js). Sits
+                         beside the Metadata matching card; the Settings→Library tab
+                         regroup is a separate PR. -->
+                    <div class="fb-srow fb-srow-stack">
+                        <div class="fb-srow-main">
+                            <div class="fb-srow-title">Artist pages</div>
+                            <div class="fb-srow-desc">A page for every artist in your library — their songs, albums and your practice progress, built entirely from your local collection. External links (official site, tour dates, videos, social) come from one MusicBrainz lookup per matched artist and always open in your browser — nothing plays in-app, and they stay off until you opt in.</div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 mb-1 text-xs text-gray-400 fb-srow-wide">
+                            <label class="flex items-center gap-2"><input type="checkbox" id="artist-pages-enabled" checked class="rounded border-gray-600 bg-dark-700 text-accent"> Artist pages</label>
+                            <label class="flex items-center gap-2"><input type="checkbox" id="artist-external-links" class="rounded border-gray-600 bg-dark-700 text-accent"> Show external links (opens your browser)</label>
                         </div>
                     </div>
                     <!-- Backup -->
@@ -797,7 +1013,13 @@
 
         <!-- Top HUD — persistent (song info, time, Up Next) -->
         <div id="player-hud" class="absolute top-0 left-0 right-0 flex justify-between items-start px-5 py-4 pointer-events-none z-20">
-            <div class="text-sm leading-tight">
+            <!-- fb-selectable: now-playing song metadata (title / artist /
+                 arrangement / tuning) is copy-worthy content, not chrome.
+                 pointer-events-auto: the #player-hud parent is pointer-events-none
+                 (so the HUD doesn't eat clicks meant for the highway), which would
+                 also block the mouse from reaching this text to select it — opt
+                 just this block back into hit-testing. -->
+            <div class="text-sm leading-tight fb-selectable pointer-events-auto">
                 <div><span id="hud-artist" class="text-gray-300"></span> — <span id="hud-title" class="text-white font-semibold"></span></div>
                 <div id="hud-arrangement" class="text-gray-500 text-xs mt-0.5"></div>
                 <div id="hud-tuning" class="text-gray-500 text-xs mt-0.5"></div>
@@ -818,9 +1040,12 @@
                     <div id="v3-live-performance-state" class="v3-live-performance-state" aria-hidden="true"></div>
                 </div>
                 <div id="v3-upnext" class="v3-upnext hidden">
-                    <span class="text-gray-400">Up Next:</span>
-                    <span id="v3-upnext-name" class="v3-upnext-name"></span>
-                    <span id="v3-upnext-eta" class="text-gray-400 text-xs"></span>
+                    <div class="v3-upnext-row">
+                        <span class="text-gray-400">Up Next:</span>
+                        <span id="v3-upnext-name" class="v3-upnext-name"></span>
+                        <span id="v3-upnext-eta" class="text-gray-400 text-xs"></span>
+                    </div>
+                    <div class="v3-upnext-bar"><div id="v3-upnext-bar-fill" class="v3-upnext-bar-fill"></div></div>
                 </div>
             </div>
         </div>
@@ -844,6 +1069,10 @@
                     <span class="v3-rail-border"></span>
                     <svg class="v3-rail-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12,2A3,3 0 0,1 15,5V11A3,3 0 0,1 12,14A3,3 0 0,1 9,11V5A3,3 0 0,1 12,2M19,11C19,14.53 16.39,17.44 13,17.93V21H11V17.93C7.61,17.44 5,14.53 5,11H7A5,5 0 0,0 12,16A5,5 0 0,0 17,11H19Z"/></svg>
                 </button>
+                <button class="v3-rail-icon" type="button" data-rail="panes" aria-haspopup="true" aria-expanded="false" aria-controls="v3-rail-pop-panes" title="Panes" aria-label="Panes">
+                    <span class="v3-rail-border"></span>
+                    <svg class="v3-rail-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M19,4H5A2,2 0 0,0 3,6V18A2,2 0 0,0 5,20H19A2,2 0 0,0 21,18V6A2,2 0 0,0 19,4M13,18H5V6H13V18M19,18H15V6H19V18Z"/></svg>
+                </button>
                 <button class="v3-rail-icon" type="button" data-rail="plugins" aria-haspopup="true" aria-expanded="false" aria-controls="v3-rail-pop-plugins" title="Plugin controls" aria-label="Plugin controls">
                     <span class="v3-rail-border"></span>
                     <span class="v3-rail-badge" id="v3-plugin-count" hidden></span>
@@ -860,6 +1089,15 @@
                  injects into #player-controls (the auto-hiding transport) into
                  this stable, always-reachable popover. See player-chrome.js
                  (rehoming MutationObserver). -->
+            <!-- Panes: open/close any registered detachable pane. Populated from
+                 the pane registry by static/panes/pane-launcher.js — a plugin
+                 that calls feedBack.panes.register() shows up here for free. -->
+            <div id="v3-rail-pop-panes" class="v3-rail-pop hidden" role="group" aria-label="Panes">
+                <div class="v3-pop-label">Panes</div>
+                <div id="v3-rail-panes-list" class="flex flex-col gap-1"></div>
+                <p class="text-xs text-gray-500 px-1 pb-1 leading-snug">Panes stay open while you play, and across song switches.</p>
+            </div>
+
             <div id="v3-rail-pop-plugins" class="v3-rail-pop hidden" role="group" aria-label="Plugin controls">
                 <div class="v3-pop-label">Plugin controls</div>
                 <div id="v3-plugin-controls-slot" class="v3-plugin-slot"></div>
@@ -884,6 +1122,15 @@
                         <option value="1">HD</option>
                         <option value="0.75">Medium</option>
                         <option value="0.5">Low</option>
+                    </select>
+                </div>
+                <div class="v3-pop-row">
+                    <span class="v3-pop-label" id="min-scale-label">Min res</span>
+                    <select id="min-scale-select" onchange="highway.setMinRenderScale && highway.setMinRenderScale(parseFloat(this.value))" class="v3-pop-select" aria-labelledby="min-scale-label" title="Minimum auto resolution — how far the highway may lower its resolution to hold the frame rate on heavy scenes. 'Full' disables auto-downscaling, but the Quality selector still caps the maximum (so it's only full resolution at Quality = HD).">
+                        <option value="0.25">25%</option>
+                        <option value="0.5">50%</option>
+                        <option value="0.75">75%</option>
+                        <option value="1">Full</option>
                     </select>
                 </div>
                 <div class="v3-pop-row">
@@ -947,6 +1194,10 @@
                         <button id="arr-default-pin" type="button" onclick="pinCurrentArrangementDefault()" aria-pressed="false" aria-label="Select an arrangement to make it the default" class="v3-pop-pin" title="Select an arrangement to make it the default">☆</button>
                     </span>
                 </div>
+                <div class="v3-pop-row hidden" id="v3-drum-part-row">
+                    <span class="v3-pop-label">Drum part</span>
+                    <select id="drum-part-select" onchange="changeDrumPart(this.value)" class="v3-pop-select max-w-[130px]" title="Which drum chart to play — a song can carry several"></select>
+                </div>
                 <div class="v3-pop-row">
                     <span class="v3-pop-label" id="mastery-slider-label">Difficulty</span>
                     <span class="flex items-center gap-2">
@@ -985,7 +1236,7 @@
                         <button onclick="returnToEditorFromHighway()" id="btn-return-editor" class="v3-pop-btn hidden" title="Return to the editor where you left off">↩ Editor</button>
                     </span>
                 </div>
-                <button onclick="showScreen('home')" class="v3-pop-close" title="Close player">✕ Close player</button>
+                <button onclick="requestExitSong()" class="v3-pop-close" title="Close player">✕ Close player</button>
             </div>
         </div>
 
@@ -1028,56 +1279,76 @@
     </main>
     <!-- /#v3-main -->
 
-    <script src="/static/highway.js"></script>
-    <script src="/static/vendor/lottie.min.js"></script>
-    <script src="/static/lottie-api.js"></script>
-    <script src="/static/app.js"></script>
-    <script src="/static/audio-mixer.js"></script>
-    <script src="/static/vendor/shepherd.min.js"></script>
-    <script src="/static/tour-engine.js"></script>
+    <script type="module" src="/static/highway.js"></script>
+    <script defer src="/static/vendor/lottie.min.js"></script>
+    <script defer src="/static/lottie-api.js"></script>
+    <script type="module" src="/static/app.js"></script>
+    <script defer src="/static/audio-mixer.js"></script>
+    <script defer src="/static/vendor/shepherd.min.js"></script>
+    <script defer src="/static/tour-engine.js"></script>
     <!-- fee[dB]ack v0.3.0 shell: brand helper, then the shell (sidebar/topbar/
          routing). Loaded after app.js/audio-mixer so window.showScreen and
          window.feedBack(.audio) exist; dashboard.js is filled in prompt 13. -->
-    <script src="/static/v3/brand.js"></script>
-    <script src="/static/v3/shell.js"></script>
+    <script defer src="/static/v3/brand.js"></script>
+    <script defer src="/static/v3/shell.js"></script>
     <!-- Progression (spec 010): theme-core before profile.js so the equipped
          theme/avatar frame apply with the first badge render; progression-core
          registers the `progression` capability owner + window.v3Progression. -->
-    <script src="/static/v3/theme-core.js"></script>
-    <script src="/static/v3/progression-core.js"></script>
-    <script src="/static/v3/notifications.js"></script>
-    <script src="/static/v3/profile.js"></script>
-    <script src="/static/v3/progress.js"></script>
-    <script src="/static/v3/shop.js"></script>
-    <script src="/static/v3/tuner-core.js"></script>
-    <script src="/static/v3/badges.js"></script>
-    <script src="/static/v3/stats-recorder.js"></script>
-    <script src="/static/v3/live-performance-hud.js"></script>
-    <script src="/static/v3/scoreboard-pref.js"></script>
-    <script src="/static/v3/venue-viz.js"></script>
-    <script src="/static/v3/venue-instrument-pov.js"></script>
+    <script defer src="/static/v3/theme-core.js"></script>
+    <script defer src="/static/v3/progression-core.js"></script>
+    <script defer src="/static/v3/notifications.js"></script>
+    <script defer src="/static/v3/gamepad.js"></script>
+    <script defer src="/static/v3/profile.js"></script>
+    <script defer src="/static/v3/progress.js"></script>
+    <script defer src="/static/v3/shop.js"></script>
+    <script defer src="/static/v3/tuner-core.js"></script>
+    <script defer src="/static/v3/badges.js"></script>
+    <script defer src="/static/v3/stats-recorder.js"></script>
+    <script defer src="/static/v3/live-performance-hud.js"></script>
+    <script defer src="/static/v3/scoreboard-pref.js"></script>
+    <script defer src="/static/v3/venue-viz.js"></script>
+    <script defer src="/static/v3/venue-instrument-pov.js"></script>
     <!-- venue-mood-fx must load before venue-scene-3d: the scene bridge reads
          window.v3VenueMoodFx.getMotion() synchronously at boot when the saved
          viz is 'venue'; loading it after falls back to 'subtle' and ignores a
          saved 'off'/'full' motion preference on first paint. -->
-    <script src="/static/v3/venue-mood-fx.js"></script>
-    <script src="/static/v3/venue-scene-3d.js"></script>
-    <script src="/static/v3/playlists.js"></script>
-    <script src="/static/v3/audio-routing.js"></script>
-    <script src="/static/v3/live-guitar-tone-source.js"></script>
-    <script src="/static/v3/pedal-cables.js"></script>
-    <script src="/static/v3/plugins-page.js"></script>
-    <script src="/static/v3/card-actions-core.js"></script>
-    <script src="/static/v3/songs.js"></script>
-    <script src="/static/v3/lessons.js"></script>
-    <script src="/static/v3/dashboard.js"></script>
-    <script src="/static/v3/settings.js"></script>
+    <script defer src="/static/v3/venue-mood-fx.js"></script>
+    <script defer src="/static/v3/venue-scene-3d.js"></script>
+    <script defer src="/static/v3/venue-crowd.js"></script>
+    <script defer src="/static/v3/playlists.js"></script>
+    <script defer src="/static/v3/audio-routing.js"></script>
+    <script defer src="/static/v3/live-guitar-tone-source.js"></script>
+    <script defer src="/static/v3/pedal-cables.js"></script>
+    <script defer src="/static/v3/plugins-page.js"></script>
+    <script defer src="/static/v3/card-actions-core.js"></script>
+    <!-- Before songs.js: the songs toolbar calls the match-review chip hook
+         on build, so the module must already be registered. -->
+    <script defer src="/static/v3/match-review.js"></script>
+    <!-- Before songs.js: the drawer art click + card ⋮ "Change cover…" open
+         the cover picker (window.__fbOpenImagePicker). -->
+    <script defer src="/static/v3/image-picker.js"></script>
+    <script defer src="/static/v3/songs.js"></script>
+    <script defer src="/static/v3/gamepad-nav.js"></script>
+    <script defer src="/static/v3/lessons.js"></script>
+    <script defer src="/static/v3/dashboard.js"></script>
+    <script defer src="/static/v3/settings.js"></script>
+    <script defer src="/static/v3/interface-size-ui.js"></script>
     <!-- First-run home tour: spotlights the home cards via the shared tour
          engine (tour-engine.js, loaded above). Auto-runs once after onboarding
          (triggered from profile.js finish()); replayable from the "?" menu. -->
-    <script src="/static/v3/onboarding-tour.js"></script>
-    <script src="/static/v3/feedbarcade.js"></script>
-    <script src="/static/v3/player-chrome.js"></script>
+    <script defer src="/static/v3/onboarding-tour.js"></script>
+    <script defer src="/static/v3/interface-size-nudge.js"></script>
+    <script defer src="/static/v3/feedbarcade.js"></script>
+    <script defer src="/static/v3/player-chrome.js"></script>
+    <!-- Detachable panes. The manager first; then the hosts, which register
+         themselves with it; then the chip and the launcher, which drive it.
+         pane-desktop only does anything inside the desktop app. -->
+    <script defer src="/static/panes/pane-manager.js"></script>
+    <script defer src="/static/panes/pane-dock.js"></script>
+    <script defer src="/static/panes/pane-window-host.js"></script>
+    <script defer src="/static/panes/pane-desktop.js"></script>
+    <script defer src="/static/panes/pane-chip.js"></script>
+    <script defer src="/static/panes/pane-launcher.js"></script>
     <script>
         // Navbar scroll effect
         window.addEventListener('scroll', () => {

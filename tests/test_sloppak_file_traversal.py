@@ -37,6 +37,7 @@ def dlc_client(tmp_path, monkeypatch):
     static_tmp = tmp_path / "static"
     static_tmp.mkdir()
     monkeypatch.setattr(server, "STATIC_DIR", static_tmp)
+    monkeypatch.setattr(server.appstate, "static_dir", static_tmp)
     tc = TestClient(server.app, client=("127.0.0.1", 50000))
     try:
         yield tc, server, dlc
@@ -45,6 +46,7 @@ def dlc_client(tmp_path, monkeypatch):
         meta_db = getattr(server, "meta_db", None)
         conn = getattr(meta_db, "conn", None)
         if conn is not None:
+            getattr(__import__("sys").modules.get("server"), "_join_background_db_threads", lambda: None)()
             conn.close()
 
 

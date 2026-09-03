@@ -46,56 +46,6 @@ def capture_logger(caplog, logger_name, level=logging.WARNING):
         logger.propagate = orig_propagate
 
 
-# Bare module names that this test module pre-populates into
-# sys.modules to simulate the bare-import path. Saved/restored by
-# the reset_plugin_state fixture so they don't leak to other test
-# files. Codex / Copilot review on PR for feedBack#33.
-_BARE_NAMES_USED = ("util", "extractor")
-
-
-@pytest.fixture()
-def reset_plugin_state(monkeypatch):
-    """Clear loader module-level state and restore on teardown.
-
-    Saves and restores:
-      * `plugins.LOADED_PLUGINS`
-      * any `plugin_*` keys we add to `sys.modules`
-      * the bare names this module simulates (`util`, `extractor`)
-      * `sys.path` — `plugins.load_plugins()` mutates it
-    Also unsets `FEEDBACK_PLUGINS_DIR` for the test's duration
-    (via monkeypatch) so a CI env that pre-sets it can't leak
-    real user plugins into a tmp_path-driven test. Per-module
-    locks are owned by the standard import system
-    (`importlib._bootstrap._module_locks`) and are not our
-    responsibility to reset.
-    """
-    monkeypatch.delenv("FEEDBACK_PLUGINS_DIR", raising=False)
-    plugins = importlib.import_module("plugins")
-    saved_loaded = list(plugins.LOADED_PLUGINS)
-    saved_pending = dict(plugins.PENDING_PLUGINS)
-    saved_modules = {k: v for k, v in sys.modules.items() if k.startswith("plugin_")}
-    saved_bare = {k: sys.modules[k] for k in _BARE_NAMES_USED if k in sys.modules}
-    saved_path = list(sys.path)
-    plugins.LOADED_PLUGINS.clear()
-    plugins.PENDING_PLUGINS.clear()
-    for k in list(sys.modules):
-        if k.startswith("plugin_") or k in _BARE_NAMES_USED:
-            del sys.modules[k]
-    try:
-        yield plugins
-    finally:
-        plugins.LOADED_PLUGINS.clear()
-        plugins.LOADED_PLUGINS.extend(saved_loaded)
-        plugins.PENDING_PLUGINS.clear()
-        plugins.PENDING_PLUGINS.update(saved_pending)
-        for k in list(sys.modules):
-            if k.startswith("plugin_") or k in _BARE_NAMES_USED:
-                del sys.modules[k]
-        sys.modules.update(saved_modules)
-        sys.modules.update(saved_bare)
-        sys.path[:] = saved_path
-
-
 def _make_plugin(plugin_root, plugin_id, *, sibling_files=None, routes_body=None):
     """Create a minimal plugin directory under `plugin_root`.
 
@@ -4035,3 +3985,35 @@ def test_settings_category_parsed_from_manifest(tmp_path, reset_plugin_state):
     assert rows["plainset"]["has_settings"] is True
     assert rows["noset"]["settings_category"] is None
     assert rows["noset"]["has_settings"] is False
+
+
+def test_fullscreen_flag_parsed_from_manifest(tmp_path, reset_plugin_state):
+    """A plugin manifest's top-level `fullscreen: true` surfaces as the boolean
+    `fullscreen` on the loaded entry (drives the v3 shell's immersive mode).
+    Only a strict boolean `true` opts in — absent, false, or a truthy non-bool
+    (e.g. the string "true") all resolve to False so a plugin can't be opted in
+    by accident."""
+    plugins = reset_plugin_state
+
+    def _write(pid, manifest_extra):
+        d = tmp_path / pid
+        d.mkdir()
+        (d / "plugin.json").write_text(json.dumps({
+            "id": pid, "name": pid, "routes": "routes.py",
+            "screen": "screen.html", **manifest_extra,
+        }))
+        (d / "routes.py").write_text("def setup(app, ctx):\n    pass\n")
+        (d / "screen.html").write_text("<div></div>")
+
+    _write("immersive", {"fullscreen": True})
+    _write("strflag", {"fullscreen": "true"})   # truthy non-bool → not opted in
+    _write("falseflag", {"fullscreen": False})
+    _write("noflag", {})                          # field absent
+
+    _run_load_plugins(plugins, type("FakeApp", (), {})(), tmp_path)
+
+    rows = {p["id"]: p for p in plugins.LOADED_PLUGINS}
+    assert rows["immersive"]["fullscreen"] is True
+    assert rows["strflag"]["fullscreen"] is False
+    assert rows["falseflag"]["fullscreen"] is False
+    assert rows["noflag"]["fullscreen"] is False

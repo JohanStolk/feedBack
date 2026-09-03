@@ -108,9 +108,19 @@ Each entry names the function or banner you should grep for, plus key sub-blocks
 - **Beat lines** (downbeats highlighted) → `update()`, `// ── Beat lines ──` block. `mBeatM` (full opacity 0.25) for measure starts, `mBeatQ` (0.07) for other beats.
 - **Section labels** → `update()`, `// ── Section labels ──` block. Cyan (`#00cccc`) sprite at fret 12, above the highest string.
 
+### Scene colors (two independent axes: Background + Highway)
+- **Scene-color themes** → `BG_THEMES` table near the top of `createFactory()`. One combined table is the single source of truth, but it drives **two independent axes that share the same id-set**:
+  - **Background axis** — setting key `bgTheme`, setter `window.h3dBgSetBgTheme`, state `bgThemeId`. Owns `clear` (WebGL clear color) + `fog`.
+  - **Highway axis** — setting key `hwTheme`, setter `window.h3dBgSetHwTheme`, state `hwThemeId`. Owns `board` (fretboard/highway-surface plane) + optional `lane`/`laneDim` (the lit lane strip).
+  Any background id can mix with any highway id; picking the same id in both gives the original "matched" look. Per-axis accessors are `_bgBackgroundColors(id)` / `_bgHighwayColors(id)` (both alias `_bgThemeColors`). Both axes default to `'default'` (byte-identical to the original look).
+- **Applying a theme** → `_applyBgTheme()`. Background half sets clear+fog from `bgThemeId` (skipped under the venue scene); highway half sets the board plane + lane materials (`mLaneOdd`/`mLaneEven`) from `hwThemeId`. Re-run on init, `buildBoard()`, and the settings listener (which fires for **both** `bgTheme` and `hwTheme`), so changing either dropdown retints only its half live.
+- **Backward-compat migration** → `_bgLoadSettings()`: the first time it loads with no stored `hwTheme` (`_bgHasStored` false), it seeds `hwThemeId` from `bgThemeId` **and persists `hwTheme` once** (a one-time backfill, written without `_bgEmitChange`). So a pre-split single-`bgTheme` pick is byte-identical right after the upgrade, and from then on the two axes are fully independent — changing the Background dropdown never drags the Highway surface, and the settings UI's Highway value can't disagree with what's rendered. settings.html shows the same first-load value via `storedHwTheme == null ? bgTheme : coerceHwTheme(...)`.
+- **Adding/removing a theme** → edit `BG_THEMES` (the colors) AND `settings.html`'s `SCENE_THEMES` array (the `{id,label}` list — the single source the two dropdowns' `<option>`s and the `VALID_BG_THEMES` validator are both generated from). Keep the two id-sets aligned.
+
 ### Highway lane (the highlighted strip under active frets)
 - **Lane drawing** → `update()`, `// ── Dynamic highway lane ──` block. `pLane` is a single quad on the fretboard plane; `pLaneDivider` is thin vertical lines at each fret inside the lane. Width keys off the active-fret range; min width ≈ 4 frets.
-- **Lane intensity** → `highwayIntensity` accumulated from upcoming notes (further notes dim it, near notes light it). `_laneTargetColor = 0x4488ff` (set in `initScene()`) is the "lit" color, blended toward from `0x112233`.
+- **Lane intensity** → `highwayIntensity` accumulated from upcoming notes (further notes dim it, near notes light it).
+- **Lane color** → the lit quad color is `mLaneOdd.color` (stock `HWY_LANE_STRIPE_ODD_HEX = 0x103B5C`), the dimmer alternating row `mLaneEven.color` (`HWY_LANE_STRIPE_EVEN_HEX = 0x08283C`). These are now **theme-aware**: `_applyBgTheme()` recolors them from the active HIGHWAY theme's optional `lane`/`laneDim` fields, falling back to the stock hexes when a highway theme omits them. (`_laneTargetColor`, set in `initScene()`, is kept in sync with the lit color but has no live consumer today.)
 
 ### Lyrics & overlays
 - **Lyrics overlay** → `drawLyrics()`. 2D canvas, top centre, semi-transparent rounded background, syllable-level highlighting (current syllable in white, played in muted, upcoming in dim).
@@ -145,7 +155,9 @@ Every per-frame renderer call receives a `bundle` from feedBack core. Fields use
 - `lefty` — display flag consumed by this renderer from `bundle.lefty`. Captured into `_leftyCached` before each frame so `xFret()`, `xFretMid()`, `boardSpanX()`, board geometry, note placement, and the camera shoulder offset mirror the fret axis for left-handed mode. A runtime lefty flip rebuilds board state and mirrors `curX`/`tgtX` plus the lookahead camera X cache so the camera does not drift across the neck.
 - `getNoteState(note, chartTime)` — feedBack#254; per-note judgment from a scorer (note_detect). Captured each frame into `_ndGetNoteState` at the top of `update()` and consulted in `drawNote()` AFTER the event-driven `_ndHitMarks`/`_ndMissMarks` lookup AND over the proximity-based `hit` heuristic, both of which it overrides when it has a verdict: `'hit'`/`'active'` → `mGlow[s]` outline (bright string-tinted, *not* green) + `mGlow[s]` body + `mGlow[s]` sustain trail + a queue entry for `drawNotedetectSizzle` (so a held sustain keeps glowing/sparkling as long as the provider keeps returning `'active'`); `'miss'` → `mMissOutline` and `_showHit = false` (suppresses the bright body even if the note is near the line). Called with the note's chart time (`n.t`), which is how note_detect keys its `noteResults` map — *not* `now`. Returns null on cores without the API or songs with no scorer — then the event path / `hit` heuristic drive feedback for older note_detect builds. **notedetect ≥1.13 object verdicts additionally carry `{ points, mult, popKey }`** (game-scoring layer): `points` is the note's awarded score, `mult` the multiplier tier it landed at, and `popKey` a dedup key — chord members all return the chord-level judgment's key so a chord pops once, not once per gem. Consumed by the score-pop spawn in `drawNote()` (see Score FX below); all three are absent on older notedetect builds, so guard with `!== undefined`.
 
-`tuning` and `capo` aren't consumed by this plugin.
+`tuning` and `capo` feed only the nut's open-string pitch labels. They prefer the bundle's effective values; `songInfo` remains the original metadata fallback. Note placement never reads them.
+
+Core reuses the bundle OBJECT across frames (mutated in place); never cache it or compare its identity between frames — field values are only valid for the current draw call. Field-identity caches on ARRAY fields (this plugin's `_mergeCacheChordsRef === bundle.chords` etc.) remain valid: arrays still swap reference when chart data changes. Core also exposes `bundle.lowerBoundT(arr, time)` (lower-bound on `.t`, notes/chords) and `bundle.lowerBoundTime(arr, time)` (on `.time`, beats/anchors/sections) — prefer these over the local `lowerBoundT` helper when a downlevel-host fallback isn't needed.
 
 ### Score FX (notedetect game-scoring layer)
 
@@ -201,7 +213,7 @@ The eight-color palette `S_COL` is the single source of truth for per-string col
 
 If a planned color-palette feature lands (issue #10), expect it to swap the palette source array but keep this single-array indirection. Anything that hardcodes color today will break that swap; flag it during review.
 
-Non-string colors (lane target `0x4488ff`, fret-row label colors `#ffe84d` / `#9ab8cc`, fret-dot color `0x556677`, lyrics box rgba, chord-name gold `#e8d080`, etc.) are scattered as literals — that's intentional for now, since they're scene-wide accents rather than per-string. Pulling them into named constants is fine if you're already in that area.
+Non-string colors (the stock lane hexes `HWY_LANE_STRIPE_ODD_HEX`/`_EVEN_HEX` — now overridable per Highway theme, see "Scene colors" above; fret-row label colors `#ffe84d` / `#9ab8cc`, fret-dot color `0x556677`, lyrics box rgba, chord-name gold `#e8d080`, etc.) are scattered as literals — that's intentional for now, since they're scene-wide accents rather than per-string. Pulling them into named constants is fine if you're already in that area.
 
 ## Tweaking text-sprite styling
 

@@ -17,6 +17,13 @@
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
         { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+    // Plugin ids whose manifest declared `"fullscreen": true`. Populated from
+    // /api/plugins in renderPromotedNav(); read by syncActive() to toggle the
+    // immersive (chrome-collapsed) shell whenever such a plugin's screen is the
+    // active one. Empty until plugins resolve — the worst case is one extra
+    // syncActive() once the fetch lands, which re-applies the class.
+    const FULLSCREEN_PLUGIN_IDS = new Set();
+
     // ── Navigation registry ────────────────────────────────────────────────
     // Each entry maps a stable hash key → a screen id (showScreen target) and a
     // label. Legacy screens are reused: "Songs" = #home (library), "Favorites"
@@ -29,7 +36,7 @@
         { key: 'plugins',    screen: 'v3-plugins',       label: 'Plugins',         group: 'HOME',    icon: 'plug' },
         { key: 'settings',   screen: 'settings',         label: 'Settings',        group: 'HOME',    icon: 'gear' },
         { key: 'playlists',  screen: 'v3-playlists',     label: 'Playlists',       group: 'LIBRARY', icon: 'list' },
-        { key: 'songs',      screen: 'v3-songs',         label: 'Songs',           group: 'LIBRARY', icon: 'disc' },
+        { key: 'songs',      screen: 'v3-songs',         label: 'Song Library',    group: 'LIBRARY', icon: 'disc' },
         { key: 'lessons',    screen: 'v3-lessons',       label: 'Lessons',         group: 'LIBRARY', icon: 'lessons' },
         { key: 'favorites',  screen: 'favorites',        label: 'Favorites',       group: 'LIBRARY', icon: 'star' },
         { key: 'saved',      screen: 'v3-saved',         label: 'Saved for Later', group: 'LIBRARY', icon: 'bookmark' },
@@ -41,8 +48,10 @@
         // above. Screens are injected async by the plugin loader, so go()'s
         // plugin- guard applies.
         { key: 'virtuoso',    screen: 'plugin-virtuoso',    label: 'Virtuoso - Practice', group: null, icon: 'target' },
+        { key: 'career',      screen: 'plugin-career',      label: 'Career',      group: null,      icon: 'trophy' },
         { key: 'rig_builder', screen: 'plugin-rig_builder', label: 'Rig Builder', group: null,      icon: 'amp' },
         { key: 'editor',      screen: 'plugin-editor',      label: 'Song Editor', group: null,      icon: 'edit' },
+        { key: 'audio_engine', screen: 'plugin-audio_engine', label: 'Audio', group: null,        icon: 'amp' },
         // Not in the sidebar groups, but routable (profile badge → here).
         { key: 'profile',   screen: 'v3-profile',   label: 'Profile',         group: null,      icon: 'user' },
     ];
@@ -52,8 +61,10 @@
     // that group. Each is gated on the plugin actually being installed.
     const PROMOTED_PLUGINS = [
         { navKey: 'virtuoso',    pluginId: 'virtuoso',    slotId: 'v3-nav-virtuoso',    anchorAfter: 'feedbarcade' },
+        { navKey: 'career',      pluginId: 'career',      slotId: 'v3-nav-career',      anchorAfter: 'feedbarcade' },
         { navKey: 'rig_builder', pluginId: 'rig_builder', slotId: 'v3-nav-rig-builder', anchorAfter: 'saved' },
         { navKey: 'editor',      pluginId: 'editor',      slotId: 'v3-nav-editor',     anchorAfter: 'songs' },
+        { navKey: 'audio_engine', pluginId: 'audio_engine', slotId: 'v3-nav-audio-engine', anchorAfter: 'settings' },
     ];
     const TOPBAR_KEYS = ['home', 'songs', 'plugins', 'settings'];
     const SIDEBAR_GROUPS = ['HOME', 'LIBRARY'];
@@ -112,6 +123,15 @@
             el.classList.toggle('text-fb-textDim', !on);
         });
         setTopbarTitle(titleFor(screenId));
+        // Immersive (full-screen) plugin screens: when the active screen belongs
+        // to a plugin that opted in via `"fullscreen": true`, collapse the host
+        // chrome (topbar hidden, sidebar → icon rail; see v3.css) and let the
+        // plugin own the content area. Toggled here so it tracks every
+        // navigation, including deep-link load and programmatic showScreen().
+        const fsPluginId = (screenId && screenId.indexOf('plugin-') === 0)
+            ? screenId.slice('plugin-'.length) : null;
+        const immersive = !!(fsPluginId && FULLSCREEN_PLUGIN_IDS.has(fsPluginId));
+        document.documentElement.classList.toggle('fb-immersive', immersive);
         // Show the song search only on the library screen. Everywhere else the
         // box is irrelevant (and would silently no-op against v3Songs.search).
         const searchWrap = document.getElementById('v3-search-wrap');
@@ -144,7 +164,7 @@
         return '<a href="#/' + entry.key + '" data-v3-nav="' + entry.key + '" ' +
             'class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-fb-textDim ' +
             'hover:text-fb-text hover:bg-fb-card/50 transition-colors">' +
-            iconSvg(entry.icon) + '<span class="truncate">' + esc(labelOverride != null ? labelOverride : entry.label) + '</span></a>';
+            iconSvg(entry.icon) + '<span class="truncate v3-nav-label">' + esc(labelOverride != null ? labelOverride : entry.label) + '</span></a>';
     }
     // Empty slot for a promoted plugin, anchored after a nav item. Filled by
     // renderPromotedNav() only when the plugin is installed, so an absent
@@ -161,7 +181,7 @@
             const items = NAV.filter((n) => n.group === group);
             if (!items.length) continue;
             const itemsHTML = items.map((it) => navItemHTML(it) + promotedSlotHTML(it.key)).join('');
-            html += '<div><div class="px-3 mb-1 text-[10px] uppercase tracking-wider font-semibold text-fb-textDim/70">' +
+            html += '<div><div class="v3-nav-group px-3 mb-1 text-[0.625rem] uppercase tracking-wider font-semibold text-fb-textDim/70">' +
                 group + '</div><div class="space-y-0.5">' + itemsHTML + '</div></div>';
         }
         nav.innerHTML = html;
@@ -174,6 +194,9 @@
     }
 
     // ── Topbar ───────────────────────────────────────────────────────────---
+    // Funding cleared to come back online 2026-06-30 (offending functionality
+    // removed). feedBack-branded Patreon page.
+    const PATREON_URL = 'https://patreon.com/got_feedback';
     function renderTopbar() {
         const bar = document.getElementById('v3-topbar');
         if (!bar) return;
@@ -191,6 +214,12 @@
             '<input id="v3-search" type="search" placeholder="Search songs…" aria-label="Search songs" ' +
             'class="w-full bg-gray-800/50 border border-gray-700 rounded-md pl-10 pr-4 py-2 text-sm ' +
             'text-fb-text placeholder-fb-textDim focus:border-fb-primary focus:ring-1 focus:ring-fb-primary outline-none"></div>' +
+            // Support Us! — stays on this top utility row (NOT the title row),
+            // pushed to the right with ml-auto; hidden on the smallest widths.
+            '<a href="' + PATREON_URL + '" target="_blank" rel="noopener" class="ml-auto ' +
+            'hidden sm:inline-flex items-center gap-2 bg-fb-accent hover:bg-red-600 text-white text-sm font-medium px-4 py-2 rounded-md shadow-lg shadow-fb-accent/20 transition-colors">' +
+            '<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M14.8 3c-3 0-5.4 2.4-5.4 5.4S11.8 13.9 14.8 13.9 20.2 11.5 20.2 8.4 17.8 3 14.8 3zM3.8 3h3.4v18H3.8z"/></svg>' +
+            'Support Us!</a>' +
             '</div>' +
             // Row 2 — page header: title + ONLY the tuner/instrument/profile
             // badge cluster on the same line as the header.
@@ -270,6 +299,12 @@
             if (res.ok) plugins = await res.json();
         } catch (e) { return; } // degrade: no promoted slots
         const list = Array.isArray(plugins) ? plugins : [];
+        // Record which installed plugins requested immersive (full-screen)
+        // screens, then re-sync the active screen so the chrome collapses even
+        // if we navigated to a fullscreen plugin before /api/plugins resolved.
+        FULLSCREEN_PLUGIN_IDS.clear();
+        for (const p of list) { if (p && p.fullscreen && p.id) FULLSCREEN_PLUGIN_IDS.add(p.id); }
+        try { syncActive(currentScreenId()); } catch (e) { /* non-fatal */ }
         for (const promo of PROMOTED_PLUGINS) {
             const host = document.getElementById(promo.slotId);
             const entry = byKey(promo.navKey);
@@ -285,27 +320,55 @@
         }
     }
 
-    // ── showScreen wrapper (idempotent rehydration — design/05 §Rehydration) ─
+    // ── Stay in sync with the active screen (idempotent rehydration — design/05) ─
+    //
+    // This USED to monkey-patch window.showScreen. It doesn't any more, and that is the point.
+    //
+    // Three parties were wrapping that one global — app.js publishes it, this wrapped it, and the
+    // stems plugin wrapped it again — each capturing whatever happened to be there at the time.
+    // Plugins load ASYNCHRONOUSLY, so the chain linked up in whatever order the race settled, and
+    // a capture taken before this installed silently dropped the home -> v3-songs mapping this
+    // wrapper carried. That is why the library intermittently showed the legacy screen (#923).
+    //
+    // The mapping lives inside showScreen() now, where no wrapper can lose it. And everything
+    // left here is just "the screen changed" — which showScreen already EMITS, and which app.js,
+    // audio-mixer.js and tour-engine.js have always listened for rather than patching.
+    //
+    // So: be a listener, like everyone else. window.showScreen is a plain function again.
     function installShowScreenHook() {
         const hooks = window.__feedBackV3ShellHooks || (window.__feedBackV3ShellHooks = {});
-        hooks.syncActive = syncActive; // always point at the latest impl
+        hooks.syncActive = syncActive;   // always point at the latest impl
         if (hooks.installed) return;
         hooks.installed = true;
-        hooks.baseShowScreen = window.showScreen;
-        window.showScreen = function (id) {
-            // Route every "go to the library" navigation to the v3 native Songs
-            // screen instead of the legacy #home library, so player-close,
-            // settings-back, the hidden legacy navbar, etc. all stay in v3.
-            const target = (id === 'home') ? 'v3-songs' : id;
-            const r = hooks.baseShowScreen ? hooks.baseShowScreen.call(this, target) : undefined;
-            try { hooks.syncActive && hooks.syncActive(target); } catch (e) { /* non-fatal */ }
-            return r;
+
+        // RETRY IF THE BUS IS LATE. The old wrapper didn't need window.feedBack to exist; a
+        // listener does. Bailing out when it isn't ready yet would silently leave the sidebar
+        // highlight and topbar title frozen forever — a dead nav, with nothing thrown. (Codex
+        // caught the identical hole in the stems plugin's version of this.)
+        const wire = () => {
+            const bus = window.feedBack;
+            if (!bus || typeof bus.on !== 'function') {
+                // `feedBack:capabilities:ready` — capabilities.js:1536. NOT the slopsmith: name:
+                // that was the pre-DMCA event and NOTHING dispatches it any more, so a fallback
+                // keyed on it can never fire. Codex caught exactly that here. (The old alias is
+                // kept too, in case an older capabilities build is in play.)
+                window.addEventListener('feedBack:capabilities:ready', wire, { once: true });
+                window.addEventListener('slopsmith:capabilities:ready', wire, { once: true });
+                return;
+            }
+            bus.on('screen:changed', (ev) => {
+                const id = ev && ev.detail && ev.detail.id;
+                if (!id) return;
+                try { hooks.syncActive && hooks.syncActive(id); } catch (e) { /* non-fatal */ }
+            });
         };
+        wire();
     }
 
     // ── Boot ────────────────────────────────────────────────────────────────
     async function boot() {
-        if (window.fbBrand) window.fbBrand.renderWordmark(document.getElementById('v3-brand'), { size: 'text-xl' });
+        var _v3brand = document.getElementById('v3-brand');
+        if (_v3brand) _v3brand.innerHTML = '<img src="/static/v3/brand/feedback-logo-light.png" alt="fee[dB]ack" style="width:100%;height:auto;display:block">';
         renderSidebar();
         renderTopbar();
         ensureBackdrop();
@@ -365,7 +428,9 @@
         setTimeout(refreshHomeTitle, 700);
     }
 
-    if (document.readyState === 'loading') {
+    // `defer` runs this at readyState 'interactive' — later scripts have not
+    // evaluated yet, so wait for DOMContentLoaded (see static/v3/index.html).
+    if (document.readyState !== 'complete') {
         document.addEventListener('DOMContentLoaded', boot, { once: true });
     } else {
         boot();

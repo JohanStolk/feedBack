@@ -2,7 +2,31 @@
 
 import pytest
 
-from tunings import tuning_name
+from tunings import (
+    DEFAULT_TUNINGS,
+    TUNING_PRESET_MIDIS,
+    _valid_tuning_for_key,
+    apply_flat_instrument_patch_to_profiles,
+    open_midis_to_freqs,
+    settings_with_instrument_profiles,
+    tuning_midis_from_offsets,
+    tuning_name,
+    tuning_offsets_from_midis,
+    tuning_preset_offsets,
+)
+
+
+def test_valid_tuning_for_key_builtin_and_provider_names():
+    # A built-in valid for the key is accepted; a built-in valid only for a
+    # DIFFERENT key (misapplied, e.g. "Drop D" on a 5-string bass) is rejected.
+    assert _valid_tuning_for_key("bass-5", "Drop A") == "Drop A"
+    assert _valid_tuning_for_key("bass-5", "Drop D") is None
+    assert _valid_tuning_for_key("guitar-6", "Standard") == "Standard"
+    # A name unknown to every built-in table is a provider/custom tuning (tuner
+    # plugin, /api/tunings) the pure layer can't resolve — accept it so settings
+    # round-trip rather than normalizing it away to Standard.
+    assert _valid_tuning_for_key("bass-5", "My Custom DADGAD") == "My Custom DADGAD"
+    assert _valid_tuning_for_key("guitar-6", "x" * 65) is None   # length cap kept
 
 
 # ── Standard tunings (all six strings share the same offset) ─────────────────
@@ -132,3 +156,126 @@ def test_drop_pattern_takes_precedence_over_named_dict():
     # auto-generator fires first and produces the same string. The named dict entry
     # is effectively dead code for this case — this test documents the behavior.
     assert tuning_name([-2, 0, 0, 0, 0, 0]) == "Drop D"
+
+
+# ── Host tuning profile catalogue -------------------------------------------
+
+def test_default_tunings_include_extended_host_profiles():
+    assert "bass-6" in DEFAULT_TUNINGS
+    assert "C Standard" in DEFAULT_TUNINGS["guitar-6"]
+    assert "C# Standard" in DEFAULT_TUNINGS["guitar-6"]
+    assert "Drop Ab" in DEFAULT_TUNINGS["guitar-6"]
+    assert "BEAD" in DEFAULT_TUNINGS["bass-4"]
+    assert "High C" in DEFAULT_TUNINGS["bass-5"]
+    assert "Drop A + Drop E" in DEFAULT_TUNINGS["guitar-8"]
+
+
+def test_default_tuning_frequencies_are_derived_from_midis():
+    assert DEFAULT_TUNINGS["guitar-6"]["Standard"] == open_midis_to_freqs([40, 45, 50, 55, 59, 64])
+    assert DEFAULT_TUNINGS["bass-6"]["Standard"] == open_midis_to_freqs([23, 28, 33, 38, 43, 48])
+
+
+def test_tuning_offsets_from_named_presets():
+    assert tuning_preset_offsets("guitar-6", "Drop D") == [-2, 0, 0, 0, 0, 0]
+    assert tuning_preset_offsets("guitar-6", "C Standard") == [-4, -4, -4, -4, -4, -4]
+    assert tuning_preset_offsets("bass-4", "BEAD") == [-5, -5, -5, -5]
+    assert tuning_preset_offsets("bass-5", "High C") == [5, 5, 5, 5, 5]
+
+
+def test_tuning_midis_round_trip_offsets():
+    offsets = [-2, 0, 0, 0, 0, 0]
+    midis = tuning_midis_from_offsets("guitar-6", offsets)
+    assert midis == TUNING_PRESET_MIDIS["guitar-6"]["Drop D"]
+    assert tuning_offsets_from_midis("guitar-6", midis) == offsets
+
+
+def test_tuning_conversion_rejects_wrong_string_count():
+    assert tuning_offsets_from_midis("guitar-6", [40, 45, 50, 55]) is None
+    assert tuning_midis_from_offsets("bass-4", [0, 0, 0, 0, 0]) is None
+
+def test_settings_profiles_default_to_lead_rhythm_and_bass():
+    settings = settings_with_instrument_profiles({})
+    assert settings["active_instrument_profile"] == "guitar-lead"
+    assert set(settings["instrument_profiles"]) == {"guitar-lead", "guitar-rhythm", "bass"}
+    assert settings["instrument"] == "guitar"
+    assert settings["string_count"] == 6
+    assert settings["tuning"] == "Standard"
+    assert settings["pathway"] == "songs"
+    assert settings["instrument_profiles"]["guitar-lead"]["pathway"] == "songs"
+
+
+def test_settings_profiles_migrate_legacy_flat_bass_selection():
+    settings = settings_with_instrument_profiles({
+        "instrument": "bass",
+        "string_count": 6,
+        "tuning": "C Standard",
+        "reference_pitch": 432,
+        "pathway": "practice",
+    })
+    assert settings["active_instrument_profile"] == "bass"
+    assert settings["instrument_profiles"]["bass"]["string_count"] == 6
+    assert settings["instrument_profiles"]["bass"]["tuning"] == "C Standard"
+    assert settings["reference_pitch"] == 432
+    assert settings["pathway"] == "practice"
+    assert settings["instrument_profiles"]["bass"]["pathway"] == "practice"
+
+
+def test_flat_patch_updates_active_profile_and_mirrors_legacy_keys():
+    settings = settings_with_instrument_profiles({})
+    patched = apply_flat_instrument_patch_to_profiles(settings, {"tuning": "Drop D"})
+    assert patched["tuning"] == "Drop D"
+    assert patched["instrument_profiles"]["guitar-lead"]["tuning"] == "Drop D"
+
+
+def test_flat_pathway_patch_updates_active_profile_and_mirrors_legacy_key():
+    settings = settings_with_instrument_profiles({})
+    patched = apply_flat_instrument_patch_to_profiles(settings, {"pathway": "studio"})
+    assert patched["pathway"] == "studio"
+    assert patched["instrument_profiles"]["guitar-lead"]["pathway"] == "studio"
+
+
+def test_flat_instrument_patch_defaults_to_target_string_count():
+    settings = settings_with_instrument_profiles({"instrument": "guitar", "string_count": 6, "tuning": "Drop D"})
+    patched = apply_flat_instrument_patch_to_profiles(settings, {"instrument": "bass"})
+    assert patched["instrument"] == "bass"
+    assert patched["string_count"] == 4
+    assert patched["tuning"] == "Standard"
+    assert patched["active_instrument_profile"] == "bass"
+    assert patched["instrument_profiles"]["bass"]["string_count"] == 4
+
+
+def test_flat_string_count_patch_resets_incompatible_named_tuning():
+    settings = settings_with_instrument_profiles({"instrument": "guitar", "string_count": 6, "tuning": "DADGAD"})
+    patched = apply_flat_instrument_patch_to_profiles(settings, {"string_count": 7})
+    assert patched["string_count"] == 7
+    assert patched["tuning"] == "Standard"
+
+
+# ── freqs_to_midis (the /api/tunings tuningMidis inverse) ────────────────────
+
+def test_freqs_to_midis_round_trips_every_builtin_at_440():
+    from tunings import freqs_to_midis
+    for key, presets in TUNING_PRESET_MIDIS.items():
+        for name, midis in presets.items():
+            assert freqs_to_midis(open_midis_to_freqs(midis)) == midis, f"{key}/{name}"
+
+
+def test_freqs_to_midis_round_trips_at_nonstandard_reference():
+    # The consumer footgun this exists to kill: frequencies served at a 432/450
+    # reference must recover the SAME integer midis when inverted at that
+    # reference (client-side log2-at-440 reconstruction drifts here).
+    from tunings import freqs_to_midis
+    for ref in (430.0, 432.0, 444.0, 450.0):
+        for midis in (TUNING_PRESET_MIDIS["guitar-8"]["Standard"], TUNING_PRESET_MIDIS["bass-5"]["Standard"]):
+            freqs = open_midis_to_freqs(midis, ref)
+            assert freqs_to_midis(freqs, ref) == midis, f"ref={ref}"
+
+
+def test_freqs_to_midis_rejects_garbage():
+    from tunings import freqs_to_midis
+    assert freqs_to_midis([82.41, 0]) is None          # non-positive
+    assert freqs_to_midis([82.41, "x"]) is None        # non-numeric
+    assert freqs_to_midis([float("nan")]) is None      # non-finite (would raise in int(round(...)))
+    assert freqs_to_midis([float("inf")]) is None      # non-finite
+    assert freqs_to_midis([float("-inf")]) is None     # non-finite
+    assert freqs_to_midis([]) == []                    # vacuously fine

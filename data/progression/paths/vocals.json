@@ -1,0 +1,128 @@
+{
+  "id": "vocals",
+  "name": "Vocals",
+  "icon": "vocals",
+  "order": 5,
+  "levels": [
+    {
+      "level": 1,
+      "required": 2,
+      "challenges": [
+        {
+          "id": "vocals.l1.first-phrase",
+          "title": "First Phrase",
+          "description": "Finish any vocal song with pitch detection on.",
+          "goal": { "type": "song_completed", "instrument": "vocals", "target": 1 }
+        },
+        {
+          "id": "vocals.l1.clean-run",
+          "title": "Clean Run",
+          "description": "Score 80%+ accuracy on a vocal song.",
+          "goal": { "type": "song_completed", "instrument": "vocals", "min_accuracy": 0.8, "target": 1 }
+        },
+        {
+          "id": "vocals.l1.daily-grind",
+          "title": "Daily Grind",
+          "description": "Complete 3 daily quests.",
+          "goal": { "type": "quest_completed", "period": "daily", "target": 3 }
+        }
+      ]
+    },
+    {
+      "level": 2,
+      "required": 2,
+      "challenges": [
+        {
+          "id": "vocals.l2.five-songs",
+          "title": "Warming Up",
+          "description": "Finish 5 vocal songs.",
+          "goal": { "type": "song_completed", "instrument": "vocals", "target": 5 }
+        },
+        {
+          "id": "vocals.l2.sharpshooter",
+          "title": "On Pitch",
+          "description": "Score 90%+ accuracy on a vocal song.",
+          "goal": { "type": "song_completed", "instrument": "vocals", "min_accuracy": 0.9, "target": 1 }
+        },
+        {
+          "id": "vocals.l2.arcade-debut",
+          "title": "Arcade Debut",
+          "description": "Play 3 FeedBarcade rounds.",
+          "goal": { "type": "minigame_run", "target": 3 }
+        }
+      ]
+    },
+    {
+      "level": 3,
+      "required": 2,
+      "challenges": [
+        {
+          "id": "vocals.l3.repertoire",
+          "title": "Repertoire",
+          "description": "Finish 10 different vocal songs.",
+          "goal": { "type": "song_completed", "instrument": "vocals", "distinct": true, "target": 10 }
+        },
+        {
+          "id": "vocals.l3.consistent",
+          "title": "Consistent",
+          "description": "Score 85%+ accuracy on 5 vocal songs.",
+          "goal": { "type": "song_completed", "instrument": "vocals", "min_accuracy": 0.85, "target": 5 }
+        },
+        {
+          "id": "vocals.l3.weekly-warrior",
+          "title": "Weekly Warrior",
+          "description": "Complete 2 weekly quests.",
+          "goal": { "type": "quest_completed", "period": "weekly", "target": 2 }
+        }
+      ]
+    },
+    {
+      "level": 4,
+      "required": 2,
+      "challenges": [
+        {
+          "id": "vocals.l4.streak-week",
+          "title": "Seven-Day Streak",
+          "description": "Reach a 7-day play streak.",
+          "goal": { "type": "streak_reached", "days": 7 }
+        },
+        {
+          "id": "vocals.l4.precision",
+          "title": "Pitch Perfect",
+          "description": "Score 95%+ accuracy on 3 vocal songs.",
+          "goal": { "type": "song_completed", "instrument": "vocals", "min_accuracy": 0.95, "target": 3 }
+        },
+        {
+          "id": "vocals.l4.marathon",
+          "title": "Marathon",
+          "description": "Finish 25 vocal songs.",
+          "goal": { "type": "song_completed", "instrument": "vocals", "target": 25 }
+        }
+      ]
+    },
+    {
+      "level": 5,
+      "required": 2,
+      "challenges": [
+        {
+          "id": "vocals.l5.collector",
+          "title": "Collector",
+          "description": "Earn 5,000 lifetime Decibels.",
+          "goal": { "type": "db_earned", "amount": 5000 }
+        },
+        {
+          "id": "vocals.l5.virtuoso",
+          "title": "Virtuoso",
+          "description": "Score 95%+ accuracy on 10 different vocal songs.",
+          "goal": { "type": "song_completed", "instrument": "vocals", "min_accuracy": 0.95, "distinct": true, "target": 10 }
+        },
+        {
+          "id": "vocals.l5.dedicated",
+          "title": "Dedicated",
+          "description": "Finish 50 vocal songs.",
+          "goal": { "type": "song_completed", "instrument": "vocals", "target": 50 }
+        }
+      ]
+    }
+  ]
+}

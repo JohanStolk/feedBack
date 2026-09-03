@@ -13,9 +13,9 @@
 module.exports = {
     content: [
         './static/**/*.{html,js}',
-        // fee[dB]ack v0.3.0 shell + screens (additive, behind FEEDBACK_UI=v3).
-        // Subsumed by the recursive ./static/** glob above, but listed
-        // explicitly so the v3 tree's Tailwind coverage is obvious.
+        // fee[dB]ack v0.3.0 shell + screens — the only UI since the classic v2
+        // shell was removed. Subsumed by the recursive ./static/** glob above,
+        // but listed explicitly so the v3 tree's Tailwind coverage is obvious.
         './static/v3/**/*.{html,js}',
         // One recursive plugin glob subsumes the previous four narrow ones
         // (static/**, screen.js, settings.html, *.html) and additionally
@@ -45,7 +45,7 @@ module.exports = {
                     cardMuted: '#0b1220', // inset wells
                     primary: '#0ea5e9',   // sky — primary actions, active nav, progress fill
                     primaryHi: '#38bdf8', // hover
-                    accent: '#ef4444',    // red — destructive, low-accuracy
+                    accent: '#ef4444',    // red — Support Us, destructive, low-accuracy
                     text: '#f8fafc',      // primary text
                     textDim: '#94a3b8',   // secondary text
                     border: '#334155',    // hairlines / card borders

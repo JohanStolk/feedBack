@@ -1,4 +1,4 @@
-// Verify static/app.js emits `song:seek` for every audio repositioning,
+// Verify static/js/transport.js emits `song:seek` for every audio repositioning,
 // with `{ from, to, reason }` payload. Plugins (notedetect detection-
 // suppression during seek transients) consume this contract.
 //
@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const APP_JS = path.join(__dirname, '..', '..', 'static', 'app.js');
+const APP_JS = path.join(__dirname, '..', '..', 'static', 'js', 'transport.js');
 
 function extractFunction(src, signature) {
     const start = src.indexOf(signature);
@@ -77,7 +77,10 @@ function loadFunctions(sandbox, src) {
         // _audioSeek now syncs the jump-fix tracker so far seeks don't
         // trigger an immediate revert; declare it here so the sandbox
         // assignment lands on a real binding rather than an implicit global.
-        let lastAudioTime = 0;
+        // lastAudioTime moved onto the shared player-state container
+        // (static/js/player-state.js) so a carved module can WRITE it — an imported
+        // binding is read-only. The sliced code writes S.lastAudioTime now.
+        let S = { isPlaying: false, lastAudioTime: 0 };
         // _audioSeek wraps jucePlayer.seek in a timeout race; pull in the
         // helper + constant. Tests can override jucePlayer.seek to vary
         // behavior; the timeout (2 s) is well above any test setTimeout.
@@ -284,13 +287,26 @@ test('seekBy floors at zero (does not seek to negative time)', async () => {
     assert.equal(seek.detail.to, 0);
 });
 
+// CENSUS over the WHOLE frontend, not one file. This test counts call/emit sites, and the
+// carve keeps moving them between app.js and static/js/*.js — point it at a single file
+// and the count silently shrinks as code leaves, which reads as "someone deleted an emit"
+// (or, worse, passes while genuinely missing sites). Read every source that can hold one.
+function allFrontendSources() {
+    const jsDir = path.join(__dirname, '..', '..', 'static', 'js');
+    const parts = [fs.readFileSync(path.join(__dirname, '..', '..', 'static', 'app.js'), 'utf8')];
+    for (const f of fs.readdirSync(jsDir).sort()) {
+        if (f.endsWith('.js')) parts.push(fs.readFileSync(path.join(jsDir, f), 'utf8'));
+    }
+    return parts.join('\n');
+}
+
 test('every documented seek callsite passes a reason', () => {
     // Source-order assertion: every _audioSeek call outside the
     // implementation must pass a kebab-case reason string. Catches a
     // future contributor adding a new seek path without threading the
     // reason. Line-based — regex argument capture can't balance parens
     // through Math.max/_audioTime calls.
-    const src = fs.readFileSync(APP_JS, 'utf8');
+    const src = allFrontendSources();
     const fnSrc = extractFunction(src, 'async function _audioSeek(');
     const withoutImpl = src.replace(fnSrc, '');
     const callLines = withoutImpl.split('\n').filter((l) => /_audioSeek\(/.test(l));

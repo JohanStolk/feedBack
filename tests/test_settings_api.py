@@ -10,6 +10,7 @@ shadow the config.json dlc_dir fallback.
 """
 
 import importlib
+from routers import settings as settings_router
 import json
 import sys
 
@@ -32,13 +33,13 @@ class _DirectSettingsClient:
     def get(self, path):
         if path != "/api/settings":
             raise ValueError(f"unsupported path: {path}")
-        return _DirectResponse(self._server.get_settings())
+        return _DirectResponse(settings_router.get_settings())
 
     def post(self, path, json):
         if path == "/api/settings":
-            return _DirectResponse(self._server.save_settings(json))
+            return _DirectResponse(settings_router.save_settings(json))
         if path == "/api/settings/reset":
-            return _DirectResponse(self._server.reset_settings(json))
+            return _DirectResponse(settings_router.reset_settings(json))
         raise ValueError(f"unsupported path: {path}")
 
     def close(self):
@@ -50,7 +51,7 @@ def client(tmp_path, monkeypatch):
     # Point CONFIG_DIR at a per-test temp path BEFORE server's
     # import-time side effects run. server.py reads CONFIG_DIR from the
     # environment at module load (line 35) and immediately constructs
-    # `meta_db = MetadataDB()` at module level, which calls
+    # `meta_db = MetadataDB(CONFIG_DIR)` at module level, which calls
     # CONFIG_DIR.mkdir(...) and opens a sqlite file — a plain
     # post-import monkeypatch on server.CONFIG_DIR wouldn't catch those
     # side effects, and the real user config dir would get written to.
@@ -75,6 +76,7 @@ def client(tmp_path, monkeypatch):
         meta_db = getattr(server, "meta_db", None)
         conn = getattr(meta_db, "conn", None)
         if conn is not None:
+            getattr(__import__("sys").modules.get("server"), "_join_background_db_threads", lambda: None)()
             conn.close()
 
 
@@ -218,6 +220,47 @@ def test_dlc_dir_empty_string_clears(client, tmp_path):
     assert _read_cfg(tmp_path)["dlc_dir"] == ""
 
 
+def test_unresolvable_dlc_dir_does_not_block_other_keys(client, tmp_path):
+    # Regression (feedBack-demucs-server#3): the v3 "Save" button next to the
+    # Demucs field bundles dlc_dir with demucs_server_url in one POST. A DLC
+    # path that doesn't resolve on THIS machine (stale value / unplugged drive)
+    # must not abort the whole request — the co-submitted demucs_server_url has
+    # to persist, and the bad path is surfaced as a warning rather than a hard
+    # error that drops every other key.
+    missing = str(tmp_path / "does-not-exist")
+    r = client.post("/api/settings", json={
+        "dlc_dir": missing,
+        "demucs_server_url": "http://demucs.example:7865",
+        "default_arrangement": "Lead",
+    })
+    assert r.status_code == 200
+    body = r.json()
+    # No hard error; the bad path is reported as a warning.
+    assert "error" not in body
+    assert any("does-not-exist" in w for w in body.get("warnings", []))
+    assert "does-not-exist" in body["message"]
+    cfg = _read_cfg(tmp_path)
+    # The valid keys persisted...
+    assert cfg["demucs_server_url"] == "http://demucs.example:7865"
+    assert cfg["default_arrangement"] == "Lead"
+    # ...and the unresolvable path was NOT written.
+    assert cfg.get("dlc_dir", "") != missing
+
+
+def test_valid_dlc_dir_still_reports_song_count(client, tmp_path):
+    # The happy path is unchanged: a resolvable DLC dir persists and the
+    # response message still carries the "N song files found" summary (no
+    # warnings key when nothing went wrong).
+    dlc = tmp_path / "dlc"
+    dlc.mkdir()
+    r = client.post("/api/settings", json={"dlc_dir": str(dlc)})
+    assert r.status_code == 200
+    body = r.json()
+    assert "warnings" not in body
+    assert "song files found" in body["message"]
+    assert _read_cfg(tmp_path)["dlc_dir"] == str(dlc)
+
+
 @pytest.mark.parametrize("key", ["default_arrangement", "demucs_server_url"])
 def test_string_key_null_is_noop(client, tmp_path, key):
     # Match the dlc_dir contract: null preserves the on-disk value.
@@ -296,6 +339,7 @@ def server_module(tmp_path, monkeypatch):
     meta_db = getattr(mod, "meta_db", None)
     conn = getattr(meta_db, "conn", None)
     if conn is not None:
+        getattr(__import__("sys").modules.get("server"), "_join_background_db_threads", lambda: None)()
         conn.close()
 
 
@@ -324,6 +368,7 @@ def test_get_dlc_dir_uses_config_when_env_empty(tmp_path, monkeypatch):
     finally:
         conn = getattr(getattr(mod, "meta_db", None), "conn", None)
         if conn is not None:
+            getattr(__import__("sys").modules.get("server"), "_join_background_db_threads", lambda: None)()
             conn.close()
 
 
@@ -345,6 +390,7 @@ def test_get_dlc_dir_env_takes_precedence(tmp_path, monkeypatch):
     finally:
         conn = getattr(getattr(mod, "meta_db", None), "conn", None)
         if conn is not None:
+            getattr(__import__("sys").modules.get("server"), "_join_background_db_threads", lambda: None)()
             conn.close()
 
 
@@ -362,6 +408,7 @@ def test_get_dlc_dir_env_dot_is_valid(tmp_path, monkeypatch):
     finally:
         conn = getattr(getattr(mod, "meta_db", None), "conn", None)
         if conn is not None:
+            getattr(__import__("sys").modules.get("server"), "_join_background_db_threads", lambda: None)()
             conn.close()
 
 
@@ -382,11 +429,11 @@ def test_get_dlc_dir_ignores_nonexistent_config_dir(tmp_path, server_module):
 # ── library scan fixtures ────────────────────────────────────────────────────
 
 @pytest.fixture()
-def scan_module(tmp_path, monkeypatch, isolate_logging):
+def scan_module(tmp_path, monkeypatch, isolate_logging, reset_scan_state):
     """Import server with CONFIG_DIR and DLC_DIR isolated in tmp_path.
 
     The background scan uses a `spawn` ProcessPoolExecutor in production
-    (see server._make_scan_executor), whose workers run in fresh
+    (see scan._make_scan_executor), whose workers run in fresh
     interpreters that an in-process mock.patch() can't reach. Override it
     with an in-process ThreadPoolExecutor so these tests can mock metadata
     extraction (on scan_worker, where the worker resolves it) and observe
@@ -397,13 +444,19 @@ def scan_module(tmp_path, monkeypatch, isolate_logging):
     monkeypatch.delenv("DLC_DIR", raising=False)
     sys.modules.pop("server", None)
     mod = importlib.import_module("server")
+    # The scanner is lib/scan.py now (R3b). Patch it THERE — `mod` (server) re-imports
+    # per-test, but `scan` stays cached in sys.modules, so this is the same module object
+    # server calls into. That it still works is the point of the late-bound appstate
+    # reads: scan picks up the fresh CONFIG_DIR without being re-imported itself.
+    import scan as scan_mod
     monkeypatch.setattr(
-        mod, "_make_scan_executor",
+        scan_mod, "_make_scan_executor",
         lambda: concurrent.futures.ThreadPoolExecutor(max_workers=4),
     )
     yield mod
     conn = getattr(getattr(mod, "meta_db", None), "conn", None)
     if conn is not None:
+        getattr(__import__("sys").modules.get("server"), "_join_background_db_threads", lambda: None)()
         conn.close()
 
 
@@ -437,11 +490,11 @@ def test_is_first_scan_true_when_all_songs_unscanned(tmp_path, scan_module):
     def mock_extract(f, dlc):
         # Capture the scan status on the first call (during the scanning phase)
         if not captured_status:
-            captured_status.update(scan_module._scan_status)
+            captured_status.update(importlib.import_module("scan").status())
         return {"title": f.name, "artist": "", "album": ""}
 
     with mock.patch("scan_worker._extract_meta_for_file", new=mock_extract):
-        scan_module._background_scan()
+        importlib.import_module("scan").background_scan()
 
     assert captured_status.get("is_first_scan") is True
 
@@ -466,11 +519,11 @@ def test_is_first_scan_false_when_some_songs_cached(tmp_path, scan_module):
 
     def mock_extract(f, dlc):
         if not captured_status:
-            captured_status.update(scan_module._scan_status)
+            captured_status.update(importlib.import_module("scan").status())
         return {"title": f.name, "artist": "", "album": ""}
 
     with mock.patch("scan_worker._extract_meta_for_file", new=mock_extract):
-        scan_module._background_scan()
+        importlib.import_module("scan").background_scan()
 
     assert captured_status.get("is_first_scan") is False
 
@@ -525,6 +578,7 @@ def api_client(tmp_path, monkeypatch, isolate_logging):
     finally:
         conn = getattr(getattr(server, "meta_db", None), "conn", None)
         if conn is not None:
+            getattr(__import__("sys").modules.get("server"), "_join_background_db_threads", lambda: None)()
             conn.close()
         _restore_loaded_plugins(plugins_snapshot)
 
@@ -595,7 +649,7 @@ def test_achievements_enabled_persists_and_validates(api_client, tmp_path):
 
 def test_achievements_enabled_is_resettable(server_module):
     """The flag is in the resettable allow-list so a Reset clears it to default."""
-    assert "achievements_enabled" in server_module._RESETTABLE_SETTINGS_KEYS
+    assert "achievements_enabled" in settings_router._RESETTABLE_SETTINGS_KEYS
 
 
 def test_skip_startup_tasks_drives_startup_to_complete(api_client):
@@ -653,6 +707,7 @@ def test_skip_startup_tasks_does_not_call_load_plugins_or_scan(tmp_path, monkeyp
     finally:
         conn = getattr(getattr(server, "meta_db", None), "conn", None)
         if conn is not None:
+            getattr(__import__("sys").modules.get("server"), "_join_background_db_threads", lambda: None)()
             conn.close()
         _restore_loaded_plugins(plugins_snapshot)
 
@@ -698,6 +753,7 @@ def test_skip_startup_tasks_clears_stale_plugin_registry(tmp_path, monkeypatch, 
     finally:
         conn = getattr(getattr(server, "meta_db", None), "conn", None) if server else None
         if conn is not None:
+            getattr(__import__("sys").modules.get("server"), "_join_background_db_threads", lambda: None)()
             conn.close()
         _restore_loaded_plugins(plugins_snapshot)
 
@@ -744,27 +800,140 @@ def test_defaults_include_gameplay_keys(client, tmp_path):
     assert data["fail_behavior"] == "continue"
 
 
+
+def test_get_settings_exposes_default_instrument_profiles(client, tmp_path):
+    data = client.get("/api/settings").json()
+    assert data["active_instrument_profile"] == "guitar-lead"
+    assert set(data["instrument_profiles"]) == {"guitar-lead", "guitar-rhythm", "bass"}
+    assert data["instrument"] == "guitar"
+    assert data["string_count"] == 6
+    assert data["tuning"] == "Standard"
+    assert data["pathway"] == "songs"
+
+
+def test_post_flat_instrument_updates_active_profile(client, tmp_path):
+    r = client.post("/api/settings", json={"instrument": "bass", "pathway": "practice"})
+    assert r.status_code == 200
+    cfg = _read_cfg(tmp_path)
+    assert cfg["active_instrument_profile"] == "bass"
+    assert cfg["instrument"] == "bass"
+    assert cfg["string_count"] == 4
+    assert cfg["tuning"] == "Standard"
+    assert cfg["pathway"] == "practice"
+    assert cfg["instrument_profiles"]["bass"]["string_count"] == 4
+    assert cfg["instrument_profiles"]["bass"]["pathway"] == "practice"
+
+
+def test_post_instrument_profiles_mirrors_active_profile(client, tmp_path):
+    r = client.post("/api/settings", json={
+        "active_instrument_profile": "guitar-rhythm",
+        "instrument_profiles": {
+            "guitar-rhythm": {
+                "string_count": 7,
+                "tuning": "Drop A",
+                "reference_pitch": 432,
+                "pathway": "studio",
+            },
+            "bass": {
+                "string_count": 6,
+                "tuning": "C Standard",
+            },
+        },
+    })
+    assert r.status_code == 200
+    cfg = _read_cfg(tmp_path)
+    assert cfg["active_instrument_profile"] == "guitar-rhythm"
+    assert cfg["instrument"] == "guitar"
+    assert cfg["string_count"] == 7
+    assert cfg["tuning"] == "Drop A"
+    assert cfg["reference_pitch"] == 432
+    assert cfg["pathway"] == "studio"
+
+
+def test_post_pathway_rejects_bad_value(client, tmp_path):
+    (tmp_path / "config.json").write_text(json.dumps({"pathway": "songs"}))
+    r = client.post("/api/settings", json={"pathway": "invalid"})
+    assert "error" in r.json()
+    assert _read_cfg(tmp_path)["pathway"] == "songs"
+
+
+def test_post_instrument_profiles_rejects_bad_custom_string_count(client, tmp_path):
+    r = client.post("/api/settings", json={
+        "instrument_profiles": {
+            "bass": {"string_count": 6, "tuning": [0, 0, 0, 0]},
+        },
+    })
+    assert "error" in r.json()
+
 # ── /api/settings/reset ─────────────────────────────────────────────────────
 
 def test_reset_clears_requested_keys(client, tmp_path):
     (tmp_path / "config.json").write_text(json.dumps({
         "master_difficulty": 40,
         "countdown_before_song": True,
+        "pathway": "studio",
         "default_arrangement": "Lead",
         "demucs_server_url": "http://demucs.example:9000",
     }))
     r = client.post("/api/settings/reset",
-                    json={"keys": ["master_difficulty", "countdown_before_song"]})
+                    json={"keys": ["master_difficulty", "countdown_before_song", "pathway"]})
     assert r.status_code == 200
     body = r.json()
-    assert set(body["reset"]) == {"master_difficulty", "countdown_before_song"}
+    assert set(body["reset"]) == {"master_difficulty", "countdown_before_song", "pathway"}
     cfg = _read_cfg(tmp_path)
     # Reset removes the key so GET falls back to the default.
     assert "master_difficulty" not in cfg
     assert "countdown_before_song" not in cfg
+    assert "pathway" not in cfg
     # Unlisted keys are untouched.
     assert cfg["default_arrangement"] == "Lead"
     assert cfg["demucs_server_url"] == "http://demucs.example:9000"
+
+
+def test_partial_instrument_profiles_update_preserves_others(client, tmp_path):
+    # /api/settings is a partial-merge endpoint, so a POST that carries only ONE
+    # instrument profile must not reset the others to defaults.
+    gl = client.get("/api/settings").json()["instrument_profiles"]["guitar-lead"]
+    gl = dict(gl); gl["tuning"] = "Drop D"
+    client.post("/api/settings", json={"instrument_profiles": {"guitar-lead": gl}})
+    assert (client.get("/api/settings").json()["instrument_profiles"]
+            ["guitar-lead"]["tuning"] == "Drop D")
+    # Now update ONLY bass (Drop D is valid for a 4-string bass).
+    bass = client.get("/api/settings").json()["instrument_profiles"]["bass"]
+    bass = dict(bass); bass["tuning"] = "Drop D"
+    client.post("/api/settings", json={"instrument_profiles": {"bass": bass}})
+    out = client.get("/api/settings").json()["instrument_profiles"]
+    assert out["guitar-lead"]["tuning"] == "Drop D", "the untouched profile survived"
+    assert out["bass"]["tuning"] == "Drop D"
+
+
+def test_active_profile_switch_on_fresh_config(client, tmp_path):
+    # A fresh config has no instrument_profiles; an explicit active-profile
+    # switch must be honored, not overwritten by the profile inferred from the
+    # legacy flat defaults (guitar-lead).
+    r = client.post("/api/settings", json={"active_instrument_profile": "bass"})
+    assert r.status_code == 200 and "error" not in r.json()
+    got = client.get("/api/settings").json()
+    assert got["active_instrument_profile"] == "bass"
+    assert got["instrument"] == "bass"
+
+
+def test_reset_pathway_reaches_into_instrument_profiles(client, tmp_path):
+    # pathway is mirrored into every instrument profile, so a Gameplay reset
+    # that only deleted the flat key would leave GET re-deriving the old value
+    # from the profile. The reset must reach into the persisted profiles too.
+    client.post("/api/settings", json={"pathway": "studio"})
+    assert client.get("/api/settings").json()["pathway"] == "studio"
+    profiles = _read_cfg(tmp_path)["instrument_profiles"]
+    assert any(p["pathway"] == "studio" for p in profiles.values())
+
+    r = client.post("/api/settings/reset", json={"keys": ["pathway"]})
+    assert r.status_code == 200
+    assert "pathway" in r.json()["reset"]
+    # GET re-derives from the profile — which must now be back to the default.
+    assert client.get("/api/settings").json()["pathway"] == "songs"
+    for prof in _read_cfg(tmp_path)["instrument_profiles"].values():
+        assert prof["pathway"] == "songs"
 
 
 def test_reset_ignores_unknown_keys(client, tmp_path):

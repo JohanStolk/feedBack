@@ -4,7 +4,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const APP_JS = path.join(__dirname, '..', '..', 'static', 'app.js');
+// R3d: playSong moved to static/js/session.js with showScreen and closeCurrentSong.
+const APP_JS = path.join(__dirname, '..', '..', 'static', 'js', 'session.js');
+// The speed controls were carved out into static/js/player-controls.js (R3a); playSong,
+// which resets them on a new song, stayed in app.js. This test spans both.
+const CONTROLS_JS = path.join(__dirname, '..', '..', 'static', 'js', 'player-controls.js');
 
 function extractFunction(src, signature) {
     const start = src.indexOf(signature);
@@ -119,6 +123,11 @@ function buildSandbox({ juceMode = false } = {}) {
         if (el) sliderInputs.push(el.id);
     };
     vm.createContext(sandbox);
+    // highway.js is loaded as a CLASSIC script today, so its top-level `const highway`
+    // creates a global lexical binding that app.js and the modules could reach as a bare
+    // name. That binding disappears the moment highway.js becomes a module (R3c), so every
+    // consumer now says `window.highway` — the same object, explicitly. Mirror it here.
+    if (sandbox.window && sandbox.highway) sandbox.window.highway = sandbox.highway;
     return sandbox;
 }
 
@@ -130,24 +139,35 @@ function extractConstLine(src, name) {
 
 function loadPlaySong(sandbox) {
     const src = fs.readFileSync(APP_JS, 'utf8');
-    const resetHelper = src.includes('function _resetPlaybackSpeedForNewSong')
-        ? extractFunction(src, 'function _resetPlaybackSpeedForNewSong')
+    // the module is ESM; the vm sandbox evaluates plain script text
+    const controls = fs.readFileSync(CONTROLS_JS, 'utf8').replace(/^export /gm, '');
+    const resetHelper = controls.includes('function _resetPlaybackSpeedForNewSong')
+        ? extractFunction(controls, 'function _resetPlaybackSpeedForNewSong')
         : '';
-    const speedPresetHelpers = src.includes('function _updateSpeedPresetButtons')
+    const speedPresetHelpers = controls.includes('function _updateSpeedPresetButtons')
         ? `
-        ${extractConstLine(src, 'SPEED_PRESET_PCTS')}
-        ${extractConstLine(src, 'SPEED_SNAP_THRESHOLD')}
-        ${extractFunction(src, 'function _speedPresetPctFromActive')}
-        ${extractFunction(src, 'function _updateSpeedPresetButtons')}
+        ${extractConstLine(controls, 'SPEED_PRESET_PCTS')}
+        ${extractConstLine(controls, 'SPEED_SNAP_THRESHOLD')}
+        ${extractFunction(controls, 'function _speedPresetPctFromActive')}
+        ${extractFunction(controls, 'function _updateSpeedPresetButtons')}
         `
         : '';
     const code = `
         var artAbortController = null;
-        var isPlaying = true;
+        // isPlaying moved onto the shared player-state container so a carved module can
+        // WRITE it (an imported binding is read-only). NB window.feedBack.isPlaying — the
+        // public mirror stubbed above — is a different thing and is unchanged.
+        var S = { isPlaying: true, lastAudioTime: 0 };
+        // The speed controls reach app.js through the host seam (static/js/host.js).
+        // Route it at the sandbox's EXISTING handleSliderInput spy — a fresh stub would
+        // swallow the call and the assertion below (which checks the slider was actually
+        // refreshed) would pass vacuously.
+        var host = { handleSliderInput: (el) => handleSliderInput(el) };
         var currentFilename = null;
         var _playerOriginScreen = null;
         var _pendingAutostart = false;
         function _clearAutoExit() {}
+        function _clearAutoplayHold() {}
         function _resolvePlayerOrigin() { return 'home'; }
         function _recordPlaybackBridge() {}
         function _cancelCountIn() {}
@@ -162,7 +182,7 @@ function loadPlaySong(sandbox) {
         function _scheduleSectionPracticeRetries() {}
         function loadSavedLoops() {}
         function _songEventPayload() { return { time: 7, audioT: 7, chartT: 7, perfNow: 7 }; }
-        ${extractFunction(src, 'function setSpeed')}
+        ${extractFunction(controls, 'function setSpeed')}
         ${speedPresetHelpers}
         ${resetHelper}
         ${extractFunction(src, 'async function playSong')}
