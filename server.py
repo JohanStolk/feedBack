@@ -1136,7 +1136,7 @@ def trigger_full_rescan():
         # delete_missing() prunes anything genuinely gone at the end.
         meta_db.conn.execute("UPDATE songs SET mtime = -1")
         meta_db.conn.commit()
-    if not scan.kick_scan(force=True):
+    if not scan.kick_scan(force=True, allow_mass_prune=True):
         return {"message": "Scan already in progress"}
     return {"message": "Full rescan started"}
 

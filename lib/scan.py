@@ -171,6 +171,13 @@ _SCAN_STATUS_INIT = {"running": False, "stage": "idle", "total": 0, "done": 0, "
 
 _scan_status = dict(_SCAN_STATUS_INIT)
 
+# Mass-prune guard thresholds for automatic scans (not full rescan).
+# Refuse when would_remove >= max(_PRUNE_MAX_ABS, _PRUNE_MAX_FRAC * existing).
+# At 50 % of the library (or even a single row on tiny libraries) a sudden
+# disappearance almost certainly means a degraded mount, not a real deletion.
+_PRUNE_MAX_ABS = 1
+_PRUNE_MAX_FRAC = 0.5
+
 
 def _make_scan_executor():
     """Build the executor for the background metadata scan.
@@ -213,11 +220,16 @@ def _make_scan_executor():
     )
 
 
-def background_scan(force: bool = False):
+def background_scan(force: bool = False, allow_mass_prune: bool = False):
     """Scan the library and cache song metadata on startup. Uses a process pool to bypass the GIL for CPU-bound metadata parsing.
 
     `force` skips the directory-signature fast path and always does the full
     listing/stat pass — the manual Refresh sets it (see _dir_signature_file).
+
+    `allow_mass_prune` permits the scan to prune more than the catastrophic
+    threshold (_PRUNE_MAX_FRAC of the library). Only set by /api/rescan/full
+    (explicit user intent); automatic and plain /api/rescan scans leave it
+    False so a degraded-mount partial listing can't silently wipe the library.
 
     Never sets `_scan_status["running"] = False` — ownership of that flag
     lives in `_scan_runner` so a `kick_scan()` racing this function's
@@ -313,25 +325,42 @@ def background_scan(force: bool = False):
 
     current_files = {_relpath(f, dlc) for f in all_songs}
 
-    # Guard: refuse to prune when the listing returned zero songs but the DB is
-    # non-empty. An empty listing on a non-empty library almost certainly means
-    # the DLC mount was temporarily inaccessible (FUSE remount, dirty-flag RO
-    # fallback, brief unmount) rather than every song being genuinely deleted.
-    # delete_missing({}) would remove ALL rows — a catastrophic silent purge.
-    # Treat it as a listing failure instead and leave the DB intact.
-    if not current_files:
-        with appstate.meta_db._lock:
-            _existing = appstate.meta_db.conn.execute(
-                "SELECT COUNT(*) FROM songs").fetchone()[0]
-        if _existing > 0:
+    # Guard: refuse (or warn) when the listing suggests a degraded mount.
+    # Two cases share the same logic:
+    #   1. Zero listing  — current_files empty, DB non-empty: would erase everything.
+    #   2. Partial listing — current_files non-empty but so many DB rows are absent
+    #      that it looks like a mount glitch rather than deliberate deletions.
+    #      Threshold: would_remove >= max(_PRUNE_MAX_ABS, _PRUNE_MAX_FRAC * existing).
+    # allow_mass_prune (only True for /api/rescan/full) lets the prune proceed with
+    # a warning so the user's explicit intent is honoured even in the degraded case.
+    with appstate.meta_db._lock:
+        _existing = appstate.meta_db.conn.execute(
+            "SELECT COUNT(*) FROM songs").fetchone()[0]
+
+    if _existing > 0:
+        if not current_files:
+            _would_remove = _existing
+        else:
+            with appstate.meta_db._lock:
+                _db_files = {r[0] for r in appstate.meta_db.conn.execute(
+                    "SELECT filename FROM songs").fetchall()}
+            _would_remove = len(_db_files - current_files)
+
+        _threshold = max(_PRUNE_MAX_ABS, _PRUNE_MAX_FRAC * _existing)
+        if _would_remove >= _threshold:
             _msg = (
-                f"Scan: listing returned 0 songs but the DB has {_existing} rows "
-                "— possible mount/permission issue. Skipping prune to avoid data loss."
+                f"Scan: would remove {_would_remove} of {_existing} DB rows "
+                f"(threshold {int(_threshold)}) with only {len(current_files)} song(s) visible "
+                "— possible mount/permission issue. Check the DLC mount; use Settings → "
+                "Rescan Library (full) to authorise a large prune."
             )
-            log.error("%s", _msg)
-            _scan_status = {**_SCAN_STATUS_INIT, "running": True,
-                            "stage": "error", "error": _msg}
-            return
+            if allow_mass_prune:
+                log.warning("%s — proceeding (user-authorised full rescan)", _msg)
+            else:
+                log.error("%s", _msg)
+                _scan_status = {**_SCAN_STATUS_INIT, "running": True,
+                                "stage": "error", "error": _msg}
+                return
 
     # Clean up stale DB entries. delete_missing reports both deltas (rows pruned
     # + genuinely-new files) so the scan can surface an added/removed summary.
@@ -426,6 +455,10 @@ _scan_rescan_pending = False
 # Set by kick_scan(force=True); consumed by _scan_runner for the next pass so a
 # manual Refresh bypasses the directory-signature fast path.
 _scan_force_next = False
+# Set by kick_scan(allow_mass_prune=True); allows the next pass to prune past the
+# catastrophic threshold. Sticky like _scan_force_next: if any queued request asks
+# for it, the follow-up pass honours it.
+_scan_mass_prune_next = False
 
 
 # Handles to the running scan / enrichment worker threads. Both use the shared
@@ -436,7 +469,7 @@ _scan_force_next = False
 _scan_thread: threading.Thread | None = None
 
 
-def kick_scan(force: bool = False) -> bool:
+def kick_scan(force: bool = False, allow_mass_prune: bool = False) -> bool:
     """Request a library rescan, single-flight + coalescing.
 
     `force` skips the directory-signature fast path for the resulting pass (the
@@ -445,6 +478,10 @@ def kick_scan(force: bool = False) -> bool:
     onto a running or queued scan keeps the force intent: the pass is forced if
     ANY pending request asked for it.
 
+    `allow_mass_prune` permits the resulting pass to prune past the catastrophic
+    threshold. Sticky: if any pending request set it, the follow-up pass honours it.
+    Only /api/rescan/full passes True — plain rescans and startup scans never do.
+
     Returns True if a new scan thread was started, False if one was already
     running. In the latter case a follow-up pass is queued and runs as soon
     as the current scan finishes so files landing mid-scan (e.g. an upload
@@ -452,10 +489,12 @@ def kick_scan(force: bool = False) -> bool:
     until the next periodic pass. Multiple late-arriving requests coalesce
     into a single follow-up.
     """
-    global _scan_rescan_pending, _scan_thread, _scan_force_next
+    global _scan_rescan_pending, _scan_thread, _scan_force_next, _scan_mass_prune_next
     with _scan_kick_lock:
         if force:
             _scan_force_next = True
+        if allow_mass_prune:
+            _scan_mass_prune_next = True
         if _scan_status["running"]:
             _scan_rescan_pending = True
             return False
@@ -469,15 +508,17 @@ def kick_scan(force: bool = False) -> bool:
 
 def _scan_runner():
     """Run _background_scan, then re-run if requests arrived mid-scan."""
-    global _scan_rescan_pending, _scan_force_next
+    global _scan_rescan_pending, _scan_force_next, _scan_mass_prune_next
     while True:
-        # Consume the force flag for THIS pass; a forced request queued mid-scan
-        # sets it again for the follow-up.
+        # Consume both flags for THIS pass; requests queued mid-scan set them
+        # again for the follow-up (sticky: any requester who asked for it wins).
         with _scan_kick_lock:
             forced = _scan_force_next
             _scan_force_next = False
+            mass_prune = _scan_mass_prune_next
+            _scan_mass_prune_next = False
         try:
-            background_scan(force=forced)
+            background_scan(force=forced, allow_mass_prune=mass_prune)
         except Exception:
             log.exception("background scan failed unexpectedly")
 
