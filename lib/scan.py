@@ -313,6 +313,26 @@ def background_scan(force: bool = False):
 
     current_files = {_relpath(f, dlc) for f in all_songs}
 
+    # Guard: refuse to prune when the listing returned zero songs but the DB is
+    # non-empty. An empty listing on a non-empty library almost certainly means
+    # the DLC mount was temporarily inaccessible (FUSE remount, dirty-flag RO
+    # fallback, brief unmount) rather than every song being genuinely deleted.
+    # delete_missing({}) would remove ALL rows — a catastrophic silent purge.
+    # Treat it as a listing failure instead and leave the DB intact.
+    if not current_files:
+        with appstate.meta_db._lock:
+            _existing = appstate.meta_db.conn.execute(
+                "SELECT COUNT(*) FROM songs").fetchone()[0]
+        if _existing > 0:
+            _msg = (
+                f"Scan: listing returned 0 songs but the DB has {_existing} rows "
+                "— possible mount/permission issue. Skipping prune to avoid data loss."
+            )
+            log.error("%s", _msg)
+            _scan_status = {**_SCAN_STATUS_INIT, "running": True,
+                            "stage": "error", "error": _msg}
+            return
+
     # Clean up stale DB entries. delete_missing reports both deltas (rows pruned
     # + genuinely-new files) so the scan can surface an added/removed summary.
     _delta = appstate.meta_db.delete_missing(current_files)
