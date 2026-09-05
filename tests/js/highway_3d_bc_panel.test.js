@@ -60,11 +60,13 @@ test('window.h3dBcApplySettings is assigned at module scope (not inside a functi
     // Structural check: the assignment must appear BEFORE the first `function`
     // or `export function` declaration in bc-panel.js (i.e. at module scope).
     const s = src();
-    const assignIdx   = s.indexOf('window.h3dBcApplySettings');
-    const firstFnIdx  = s.search(/^(?:export\s+)?function\s+_bc/m);
-    assert.ok(assignIdx >= 0, 'window.h3dBcApplySettings must be assigned in bc-panel.js');
-    assert.ok(firstFnIdx < 0 || assignIdx < firstFnIdx,
-        'window.h3dBcApplySettings must appear before the first _bc* function declaration (module scope)');
+    // Line-anchored regex: `^window.` matches only an unindented assignment.
+    // A comment mention or an indented assignment (inside a function body) both
+    // fail to match and return -1 — so this single check is sufficient.
+    const assignIdx = s.search(/^window\.h3dBcApplySettings\s*=/m);
+    assert.ok(assignIdx >= 0,
+        'window.h3dBcApplySettings must be assigned at line-start (module scope) in bc-panel.js — ' +
+        'an indented assignment (inside a function) would not match /^window\\./m');
 });
 
 // ── 3. _bcIsDesktop guards all three required conditions ──────────────────────
