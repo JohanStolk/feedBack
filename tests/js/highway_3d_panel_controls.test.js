@@ -100,6 +100,10 @@ function loadHighway3dStatics() {
             reconnectAudio() { return false; }, chart() {}, tint() {}, render() {},
             resize() {}, destroy() {},
         }),
+        // h3d-carve-5: player-chrome bg-control moved to src/bg-control.js.
+        createBgControl: () => ({
+            _pcAcquire() {}, _pcRelease() {},
+        }),
     };
     vm.createContext(sandbox);
     vm.runInContext(instrumented, sandbox, { filename: SCREEN_JS });

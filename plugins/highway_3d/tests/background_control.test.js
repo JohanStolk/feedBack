@@ -15,11 +15,10 @@
 //     style reads `intensity`, and none of them read audio bands under
 //     Butterchurn, so a live-looking knob that does nothing is a real bug.
 //
-// screen.js is a single ~16k-line IIFE, so the control cannot be imported. The
-// self-contained `_pc*` block is sliced out of the real source and evaluated
-// with its few collaborators stubbed (BG_STYLE_IDS, _bgReadSetting,
-// _bgSubscribe/_bgUnsubscribe). The slice markers are asserted before use: move
-// or rename the block and this fails loudly rather than testing nothing.
+// h3d-carve-5: the _pc* block was moved from screen.js to src/bg-control.js.
+// load() now evaluates the factory module (stripping the `export` keyword),
+// calls createBgControl({DI}) with stubbed deps, and injects test-only getters
+// into the return object so the private state vars remain observable.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -27,10 +26,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const SCREEN_JS = path.join(__dirname, '..', 'screen.js');
-const START = '    const _PC_LABELS = {';
-const END_CRLF = '    /* ======================================================================\r\n     *  Factory';
-const END_LF = '    /* ======================================================================\n     *  Factory';
+const SCREEN_JS     = path.join(__dirname, '..', 'screen.js');
+const BG_CONTROL_JS = path.join(__dirname, '..', 'src', 'bg-control.js');
 
 // What each style is expected to consume, derived by reading the BG_STYLES
 // bodies in screen.js — deliberately NOT read from the plugin's own _PC_USES
@@ -102,14 +99,24 @@ function makeDom() {
 }
 
 function load({ store: initialStore } = {}) {
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
-    const start = src.indexOf(START);
-    assert.notEqual(start, -1, 'could not find the _PC_LABELS marker in screen.js');
-    let end = src.indexOf(END_CRLF);
-    if (end === -1) end = src.indexOf(END_LF);
-    assert.notEqual(end, -1, 'could not find the Factory banner marker in screen.js');
-    assert.ok(end > start, 'slice markers found out of order in screen.js');
-    const block = src.slice(start, end);
+    // h3d-carve-5: load from src/bg-control.js (factory module) instead of
+    // slicing screen.js. Strip `export` for vm eval; inject test-only getters
+    // into the return object so private _pc* state vars remain observable.
+    const bgSrc = fs.readFileSync(BG_CONTROL_JS, 'utf8');
+    const stripped = bgSrc.replace(/^export\s+/gm, '');
+    // Augment the factory's return with accessor getters for private state so
+    // all existing test assertions (api.el, api.sel, api.refs, ...) keep working.
+    const instrumented = stripped.replace(
+        /return\s*\{\s*_pcAcquire\s*,\s*_pcRelease\s*\}/,
+        'return { _pcAcquire, _pcRelease,'
+        + ' get el()     { return _pcEl; },'
+        + ' get sel()    { return _pcSel; },'
+        + ' get react()  { return _pcReactive; },'
+        + ' get intens() { return _pcIntensity; },'
+        + ' get reason() { return _pcReason; },'
+        + ' get refs()   { return _pcRefs; } }',
+    );
+    assert.notEqual(instrumented, stripped, 'return-augmentation anchor not found in bg-control.js');
 
     const dom = makeDom();
     const store = Object.assign({
@@ -126,14 +133,12 @@ function load({ store: initialStore } = {}) {
     const writes = [];
     const timers = [];
 
+    // DI dependencies as vm-globals. Tests mutate sandbox._venueSceneOverride
+    // directly; getVenueSceneOverride in the factory call reads it via the vm global.
     const sandbox = {
         console,
         BG_STYLE_IDS,
-        // Module-scope in screen.js; the _pc* block reads it to resolve the
-        // effective style under the Venue override. Tests flip it via
-        // sandbox._venueSceneOverride and fire the 'venueScene' bus key.
         _venueSceneOverride: false,
-        _bgReadSetting: (_panelKey, key) => store[key],
         _bgReadGlobal: (key) => store[key],
         _bgSubscribe: (fn) => listeners.add(fn),
         _bgUnsubscribe: (fn) => listeners.delete(fn),
@@ -165,18 +170,18 @@ function load({ store: initialStore } = {}) {
         },
     };
     sandbox.globalThis = sandbox;
+    vm.createContext(sandbox);
 
-    const api = vm.runInNewContext(
-        block
-        + '\n({ _pcAcquire, _pcRelease,'
-        + '   get el() { return _pcEl; },'
-        + '   get sel() { return _pcSel; },'
-        + '   get react() { return _pcReactive; },'
-        + '   get intens() { return _pcIntensity; },'
-        + '   get reason() { return _pcReason; },'
-        + '   get refs() { return _pcRefs; } })',
+    // Step 1: define createBgControl in the vm context.
+    vm.runInContext(instrumented, sandbox);
+
+    // Step 2: call the factory; DI values are vm-globals so the call names them directly.
+    const api = vm.runInContext(
+        'createBgControl({ BG_STYLE_IDS, _bgReadGlobal, _bgSubscribe, _bgUnsubscribe,'
+        + ' getVenueSceneOverride: () => _venueSceneOverride })',
         sandbox,
     );
+
     const fireScreenChanged = () => (bus['screen:changed'] || []).slice().forEach((fn) => fn());
     const screenHooks = () => (bus['screen:changed'] || []).length;
     return { api, dom, store, emit, writes, timers, sandbox, listenerCount: () => listeners.size, fireScreenChanged, screenHooks };
