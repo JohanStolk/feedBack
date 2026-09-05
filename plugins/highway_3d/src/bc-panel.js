@@ -47,7 +47,7 @@ export function _bcIsDesktop() {
 // Position at the first entry whose time is >= ct (strict <), so an event
 // landing exactly on the seek/loop target time is still fired by the update
 // walkers (which consume `<= ct`) instead of being skipped past here.
-function _bcFfIdx(arr, ct, key) { if (!arr) return 0; let i = 0; while (i < arr.length && (arr[i][key] || 0) < ct) i++; return i; }
+export function _bcFfIdx(arr, ct, key) { if (!arr) return 0; let i = 0; while (i < arr.length && (arr[i][key] || 0) < ct) i++; return i; }
 // Force-free a canvas's WebGL context so the GPU resources are released
 // immediately instead of lingering until GC — repeated Butterchurn
 // mount/unmount cycles otherwise pile up live contexts toward the browser cap.
@@ -164,7 +164,7 @@ function _bcGuitarFeed(actx, onReady) {
 const BC_LS = 'viz3d_settings';
 const BC_DEFAULTS = { enabled: true, opacity: 1.0, laneDim: true, laneDimStrength: 0.45, chartAccents: true, colorTint: true, chartStrength: 1.0, tintStrength: 0.65, guitarGain: 6, songGain: 1.8, cyclePool: 'all', hold: false };
 let _bcSettings = null;
-function _bcLoadSettings() {
+export function _bcLoadSettings() {
     if (_bcSettings) return _bcSettings;
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem(BC_LS) || '{}'); } catch (e) {}

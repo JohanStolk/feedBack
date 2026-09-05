@@ -178,6 +178,50 @@ test('screen.js imports _bcCreateController and _bcIsDesktop from src/bc-panel.j
         'screen.js must import _bcIsDesktop from ./src/bc-panel.js');
 });
 
+// ── 12. screen.js has no bare caller references to private bc-panel.js symbols ─
+
+test('every bc-panel.js export referenced in screen.js IIFE is in the import statement', () => {
+    // Mutation: remove _bcLoadSettings (or any other export) from the screen.js import
+    // → symbol is exported by bc-panel.js, referenced in the IIFE, but not bound via
+    // import → ReferenceError at runtime.  This is the class Creed HIGH found on
+    // cut 4 (screen.js:15396-15402: _bcLoadSettings + _bcFfIdx called but not imported).
+    //
+    // Method (generalised):
+    //   exported  = all _bc* symbols with `export` keyword in bc-panel.js
+    //   imported  = all symbols in screen.js's `from './src/bc-panel.js'` import clause
+    //   leaked    = exported symbols that appear as bare refs in screen.js IIFE
+    //               but are NOT in imported
+    // Adding a new export and a new caller without updating the import → leaked is
+    // non-empty → test RED.
+    const bcSrc = src();
+    const scrSrc = screenSrc();
+
+    // All exported _bc* symbols from bc-panel.js.
+    const exported = new Set(
+        [...bcSrc.matchAll(/^export\s+(?:const|let|var|function)\s+(_bc\w+)/mg)].map(m => m[1])
+    );
+
+    // Symbols actually imported from bc-panel.js in screen.js.
+    const importMatch = scrSrc.match(/import\s+\{([^}]+)\}\s+from\s+['"]\.\/src\/bc-panel\.js['"]/);
+    const imported = new Set(
+        importMatch ? importMatch[1].split(',').map(s => s.trim()).filter(Boolean) : []
+    );
+
+    // IIFE body: strip import lines and line comments to avoid false positives.
+    const noImports  = scrSrc.replace(/^import\s+.*\n/gm, '');
+    const noComments = noImports.replace(/\/\/[^\n]*/g, '');
+
+    // Exported symbols referenced in the IIFE body but absent from the import list.
+    const leaked = [...exported].filter(
+        sym => new RegExp('\\b' + sym + '\\b').test(noComments) && !imported.has(sym)
+    );
+
+    assert.deepStrictEqual(leaked, [],
+        'screen.js references bc-panel.js exports that are not in its import clause: ' +
+        leaked.join(', ') +
+        ' — add them to the import { … } from \'./src/bc-panel.js\' line in screen.js');
+});
+
 // ── 11. screen.js IIFE no longer defines moved B-section symbols ──────────────
 
 test('screen.js IIFE does not redeclare _bcCreateController or _bcLoadLib', () => {

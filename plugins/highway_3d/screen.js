@@ -9,7 +9,7 @@
 import { geoFretX, dZ, slideTrailEnd, camBaseDistU, camLowFretPullbackU, computeBPM, _makeGaussTex, RENDER_ORDER_LAYER_STACK, RENDER_ORDER_LAYER_INDEX, RENDER_ORDER_AT_Z_ZERO, RENDER_ORDER_FAR_CLAMP, renderOrderForLayerAtZ, _noteKey, lowerBoundT, hwyFirstRelevantFrettedTime, geoFretMid } from './src/geometry.js'; // h3d-carve-1b
 import { loadThree, T } from './src/three-loader.js'; // h3d-carve-2
 import { _h3dHexToInt, _clampByteI, _darkenInt, _lightenInt, resolveStringCount as _resolveStringCountBase, _NOTE_NAMES_SHARP, _BASE_OPEN_MIDI_BASS4, _BASE_OPEN_MIDI_BASS5, _BASE_OPEN_MIDI_GUITAR6, _BASE_OPEN_MIDI_GUITAR7, _BASE_OPEN_MIDI_GUITAR8, _baseOpenStringMidis, _midiToPitchLabel, _openStringPitchLabelsForTuning as _openStringPitchLabelsForTuningBase, _ssActive, _ssIsCanvasFocused } from './src/utils.js'; // h3d-carve-3
-import { _bcIsDesktop, _bcCreateController } from './src/bc-panel.js'; // h3d-carve-4
+import { _bcIsDesktop, _bcCreateController, _bcLoadSettings, _bcFfIdx } from './src/bc-panel.js'; // h3d-carve-4
 
 (function () {
     'use strict';
@@ -25,7 +25,7 @@ import { _bcIsDesktop, _bcCreateController } from './src/bc-panel.js'; // h3d-ca
     // THREE_URL / THREE_CDN — h3d-carve-4: dead code (three-loader.js owns its own URLs). Tombstoned.
 
     // ── B-section: Butterchurn control panel — h3d-carve-4 ──────────────
-    // Moved to src/bc-panel.js. Imports: _bcIsDesktop, _bcCreateController.
+    // Moved to src/bc-panel.js. Imports: _bcIsDesktop, _bcCreateController, _bcLoadSettings, _bcFfIdx.
     // window.h3dBcApplySettings assigned at bc-panel.js module scope (R5).
     // ────────────────────────────────────────────────────────────────────
     // TOMBSTONE: BC_VENDOR, BC_FRAME, BC_WORKLET, _bcMeters, BC_BTN — h3d-carve-4: moved to src/bc-panel.js.
