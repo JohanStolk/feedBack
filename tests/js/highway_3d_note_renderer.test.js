@@ -264,6 +264,9 @@ function _buildDrawNote(overrides) {
     const pNotePool = { get: () => { pNoteGetCount++; return fakeMesh; }, release: () => {} };
     const noopPool  = { get: () => fakeMesh, release: () => {} };
     const A6 = (v) => [v, v, v, v, v, v];
+    // Creed F2 fix: distinguishable materials so getMStr/getMGlow swap is visible.
+    const mStrMats = [0,1,2,3,4,5].map(i => ({ opacity: 1, depthTest: true, name: `mStr[${i}]` }));
+    const mGlowMats = [0,1,2,3,4,5].map(i => ({ opacity: 1, depthTest: true, name: `mGlow[${i}]` }));
 
     const di = Object.assign({
         // Constants
@@ -364,8 +367,8 @@ function _buildDrawNote(overrides) {
         getPTeachMarkLbl: () => noopPool,
         getPTechPlane: () => noopPool,
         // Material getters
-        getMStr: () => A6(fakeMat),
-        getMGlow: () => A6(fakeMat),
+        getMStr: () => mStrMats,
+        getMGlow: () => mGlowMats,
         getMSus: () => fakeMat,
         getMSusOutline: () => fakeMat,
         getMHitBright: () => A6(fakeMat),
@@ -390,7 +393,7 @@ function _buildDrawNote(overrides) {
     }, overrides || {});
 
     const { drawNote } = _createNoteRendererFn(di);
-    return { drawNote, getPNoteGetCount: () => pNoteGetCount };
+    return { drawNote, getPNoteGetCount: () => pNoteGetCount, mStrMats, mGlowMats, getFakeMesh: () => fakeMesh };
 }
 
 test('drawNote: past-linger note exits before pNote.get() (early-exit kill)', () => {
@@ -412,4 +415,58 @@ test('drawNote: in-window note reaches pNote.get() × 2 (gem-path kill)', () => 
     drawNote({ s: 0, f: 5, t: 5, sus: 0 }, /*now=*/5, 0, false, false, 0.10);
     assert.ok(getPNoteGetCount() >= 2,
         `pNote.get() must be called at least twice (outline + core) for an in-window note (got ${getPNoteGetCount()})`);
+});
+
+test('drawNote: gem core.material is mStr[s], not mGlow[s] (material-identity kill)', () => {
+    // Creed F2: fake materials were identical; swapping getMStr/getMGlow in the wiring
+    // stayed green. Now mStrMats/mGlowMats are distinct objects.
+    // Kill: swap getMStr/getMGlow in _buildDrawNote overrides → core.material === mGlowMats[0] → RED.
+    const s = 0;
+    const { drawNote, mStrMats, mGlowMats, getFakeMesh } = _buildDrawNote({ getNdHasProvider: () => false });
+    drawNote({ s, f: 5, t: 5, sus: 0 }, /*now=*/5, 0, false, false, 0.10);
+    const mesh = getFakeMesh();
+    assert.strictEqual(mesh.material, mStrMats[s],
+        `gem core.material must be mStr[${s}] (got: ${mesh.material && mesh.material.name})`);
+    assert.notStrictEqual(mesh.material, mGlowMats[s],
+        'gem core.material must NOT be mGlow (getMStr/getMGlow swap must be visible)');
+});
+
+test('slideRibbonUpdatePositions: all vertex positions finite for n.tr sustain (NaN-arg kill)', () => {
+    // Creed F1: tremoloOffsetWorldX(n, Tk) dropped tw → undefined*…=NaN for all ribbon vertices.
+    // Fix: tremoloOffsetWorldX(n, Tk, tw). Kill: drop tw arg again → NaN in posArray → RED.
+    const S = 8; // matches DI SLIDE_RIBBON_SAMPLES
+    const posArray = new Float32Array((S + 1) * 4 * 3);
+    posArray.fill(NaN); // pre-fill NaN: if path not taken, assertion catches it (test setup bug)
+    let geoWritten = false;
+    const makeRibbonMesh = () => ({
+        position: { set: () => {} },
+        rotation: { set: () => {}, z: 0 },
+        scale: { set: () => {} },
+        renderOrder: 0, visible: true, material: null,
+        geometry: {
+            attributes: {
+                position: {
+                    array: posArray,
+                    set needsUpdate(v) { if (v) geoWritten = true; },
+                },
+            },
+        },
+    });
+    const ribbonPool = { get: makeRibbonMesh, release: () => {} };
+
+    const { drawNote } = _buildDrawNote({
+        getNdHasProvider: () => false,
+        getPSusRibbon:    () => ribbonPool,
+        getPSusRibbonOl:  () => ribbonPool,
+        SLIDE_RIBBON_SAMPLES: S,
+    });
+
+    // sus=0.5 (remSus=0.5>0.01), tr=1 → ribbonSusTrail=true → slideRibbonUpdatePositions called
+    drawNote({ s: 0, f: 5, t: 5, sus: 0.5, tr: 1 }, /*now=*/5, 0, false, false, 0.10);
+
+    assert.ok(geoWritten, 'geometry.needsUpdate must be set — ribbon path must be reached');
+    for (let i = 0; i < posArray.length; i++) {
+        assert.ok(Number.isFinite(posArray[i]),
+            `posArray[${i}] must be finite; NaN = dropped tw arg in tremoloOffsetWorldX`);
+    }
 });

@@ -112,7 +112,7 @@ export function createNoteRenderer({
             const zk = dZ(Tk - now);
             const xc = strandBaseX
                 + dirMul * slideOffsetWorldX(n, Tk, slideSt)
-                + tremoloOffsetWorldX(n, Tk);
+                + tremoloOffsetWorldX(n, Tk, tw); // h3d-carve-14 creed-fix: restore dropped tw arg
             const yc = y + techniqueYOffsetWorld(n, Tk);
             pa[v++] = xc - tw * 0.5; pa[v++] = yc - th * 0.5; pa[v++] = zk;
             pa[v++] = xc + tw * 0.5; pa[v++] = yc - th * 0.5; pa[v++] = zk;
