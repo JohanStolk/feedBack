@@ -112,13 +112,23 @@ export function createRenderer({
     // ── Category C — fn-refs / let-vars ──────────────────────────────────
     activePalette, anchorLaneBoundsAt, anchorPlayedFretSpanAt,
     boardSpanX, chordShapeSignature,
-    _drawAnchors, _drawChordTemplates, _drawNextByString, _drawRecentByString, _drawTeachingMarks,
+    // These 6 are the shared mutable state between update() (writer) and
+    // createNoteRenderer's drawNote (reader). Plain-value DI would fork the
+    // store — update() would write its local copy, drawNote would never see it.
+    // Setter pattern: renderer calls set*(); createNoteRenderer's existing
+    // get*() closures read the same screen.js let vars.
+    getDrawAnchors, setDrawAnchors,
+    getDrawChordTemplates, setDrawChordTemplates,
+    getDrawNextByString, setDrawNextByString,
+    getDrawRecentByString, setDrawRecentByString,
+    getDrawTeachingMarks, setDrawTeachingMarks,
+    getShowFingerHints, setShowFingerHints,
     _encodeChordVerdictKey, _firstEventTimeGreaterThan,
     fretColumnMarkerCadence, fretColumnMarkersForAnchor, fretDividersVisible,
     fretLastActiveTime, _fretMarkerWaveCache, fretWireMats, fretX,
     getChartAnchorAt, hwyPostHitTailFadeMul,
     imFHTech, imFHXFill, imFHXLines, imPMTech, imPMXFill, imPMXLines,
-    laneBoundsFromAnchor, sectionLabelsOnHighway, _showFingerHints, updateStringHighlights,
+    laneBoundsFromAnchor, sectionLabelsOnHighway, updateStringHighlights,
     _noteKey,
     bendChevronMat, darkenHex, slideArrowMat, triMat,
     palmMuteXSpriteMat, fretHandMuteXSpriteMat,
@@ -1073,12 +1083,12 @@ function update(bundle) {
         }
     }
 
-    _drawNextByString = nextNoteByString;
-    _drawChordTemplates = bundle.chordTemplates ?? null;
-    _drawAnchors = anchors ?? null;
-    _drawTeachingMarks = !!bundle.teachingMarksVisible;
+    setDrawNextByString(nextNoteByString);
+    setDrawChordTemplates(bundle.chordTemplates ?? null);
+    setDrawAnchors(anchors ?? null);
+    setDrawTeachingMarks(!!bundle.teachingMarksVisible);
     // Default on: only an explicit false (older bundles omit the flag) hides fg.
-    _showFingerHints = bundle.fingerHintsVisible !== false;
+    setShowFingerHints(bundle.fingerHintsVisible !== false);
 
     // ── Recent-past event per string (for _nextAnyT deadline) ─────
     // Once a note/chord passes `now` it leaves _drawNextByString,
@@ -1128,7 +1138,7 @@ function update(bundle) {
                 }
             }
         }
-        _drawRecentByString = _recArr;
+        setDrawRecentByString(_recArr);
     }
 
     // ── Sorted union of next/recent event times ──────────────────
@@ -1141,12 +1151,12 @@ function update(bundle) {
     // the recent-event prepass's inner-block ``_recArr`` alias.
     setScrEventTimesLen(0);
     for (let s = 0; s < nStr; s++) {
-        const nf = _drawNextByString[s];
+        const nf = getDrawNextByString()[s];
         if (nf) {
             const tn = nf.t;
             if (Number.isFinite(tn)) { const _etl = getScrEventTimesLen(); _scrEventTimes[_etl] = tn; setScrEventTimesLen(_etl + 1); }
         }
-        const rt = _drawRecentByString[s];
+        const rt = getDrawRecentByString()[s];
         if (Number.isFinite(rt)) { const _etl = getScrEventTimesLen(); _scrEventTimes[_etl] = rt; setScrEventTimesLen(_etl + 1); }
     }
     if (getScrEventTimesLen() > 1) {
@@ -2563,7 +2573,7 @@ function update(bundle) {
                 // stacked above the chord name. Gated by the
                 // teaching-marks opt-in (mirrors the 2D overlay). Display
                 // only — never grading.
-                if (_drawTeachingMarks && firstInShapeRun && !chordWireHighDensity(ch)) {
+                if (getDrawTeachingMarks() && firstInShapeRun && !chordWireHighDensity(ch)) {
                     const _tmpl = bundle.chordTemplates?.[ch.id];
                     const _h = chordHarmonyLabels(ch.fn, _tmpl?.voicing, _tmpl?.caged, _tmpl?.guideTones);
                     if (_h.rn || _h.voicing || _h.caged || _h.guideTones) {
@@ -2908,7 +2918,7 @@ function update(bundle) {
             const _fwA = Math.max(_fwE.a, _fwE.openA);
             if (_fwA <= 0) continue;
             let _w0 = -1, _w1 = -1;
-            const _fwB = anchorLaneBoundsAt(_drawAnchors, _fwE.t);
+            const _fwB = anchorLaneBoundsAt(getDrawAnchors(), _fwE.t);
             if (_fwB) {
                 _w0 = _fwB.dMin;
                 _w1 = _fwB.dMax;

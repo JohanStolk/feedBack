@@ -42,8 +42,11 @@ test('screen.js imports createRenderer from renderer.js', () => {
         'screen.js must import createRenderer');
 });
 
-test('screen.js wiring block contains expected DI param count (315)', () => {
-    // 315 = 105 getters + 48 setters + 162 shorthands
+test('screen.js wiring block contains expected DI param count (321)', () => {
+    // 321 = 117 getters + 60 setters + 144 shorthands
+    // 315→321: Creed re-check — 6 plain-value shorthands converted to getter+setter pairs:
+    //   _drawAnchors, _drawChordTemplates, _drawNextByString, _drawRecentByString,
+    //   _drawTeachingMarks, _showFingerHints. -6 shorthands, +6 getters, +6 setters = net +6.
     // 313→315: +2 Toby r3 F1 fix: _CV_KEY_TIME_MUL, _CV_KEY_TIME_SLOT restored to
     //   screen.js scope and added as shorthands (were wrongly moved to renderer closure).
     // 184→313: +129 carve-15 full completion:
@@ -68,7 +71,7 @@ test('screen.js wiring block contains expected DI param count (315)', () => {
     }, 0);
 
     const total = getterCount + setterCount + shorthandCount;
-    assert.strictEqual(total, 315,
+    assert.strictEqual(total, 321,
         `DI param count mismatch: got ${total} (getters=${getterCount}, setters=${setterCount}, shorthands=${shorthandCount})`);
 });
 
@@ -345,18 +348,60 @@ test('_CV_KEY_TIME_MUL and _CV_KEY_TIME_SLOT are declared in screen.js before _e
     assert.ok(slotIdx < fnIdx, '_CV_KEY_TIME_SLOT must be declared before _encodeChordVerdictKey in screen.js');
 });
 
+// ── 27. Class-killer guard — no DI param assigned inside renderer.js ─────────
+// Any assignment to a DI param name inside renderer.js is a silent state fork:
+// the write lands in the local copy; the shared screen.js store never updates.
+// This was the Creed re-check HIGH finding at a55dca7 (6 names: _drawAnchors,
+// _drawChordTemplates, _drawNextByString, _drawRecentByString, _drawTeachingMarks,
+// _showFingerHints). RED at a55dca7, GREEN at fix tip.
+test('renderer.js does not assign to any DI param name (no silent state forks)', () => {
+    // Extract DI param names from the createRenderer({...}) signature.
+    const diMatch = src.match(/export function createRenderer\(\{([\s\S]*?)\}\s*\)/);
+    assert.ok(diMatch, 'createRenderer DI signature not found');
+    const diBody = diMatch[1];
+    // Collect tokens from the DI body. Skip getter/setter keys (word:) and arrow bodies.
+    const diNames = new Set();
+    for (const line of diBody.split('\n')) {
+        const t = line.trim();
+        if (!t || t.startsWith('//') || t.includes('=>') || /\b\w+\s*:/.test(t)) continue;
+        for (const tok of (t.match(/\b[A-Za-z_][A-Za-z0-9_]*\b/g) || [])) diNames.add(tok);
+    }
+    assert.ok(diNames.size >= 100, `DI name extraction found only ${diNames.size} names — regex may have failed`);
+
+    // Strip line and block comments from the module body.
+    const body = src
+        .replace(/\/\/[^\n]*/g, '')
+        .replace(/\/\*[\s\S]*?\*\//g, '');
+
+    // Find any assignment to a DI param: `name =`, `name +=`, etc.
+    // Exclude the DI destructure line itself and get/set decl lines.
+    const forks = [];
+    for (const name of diNames) {
+        // Match `name =` or `name +=` etc. NOT preceded by `get/set/const/let/var `.
+        const assignPat = new RegExp(`(?<!\\bconst |\\blet |\\bvar |\\bfunction )\\b${name}\\b\\s*[+\\-*\\/&|^%]?=(?!=)`, 'g');
+        const matches = [...body.matchAll(assignPat)];
+        if (matches.length > 0) forks.push(`${name} (${matches.length} assignment${matches.length > 1 ? 's' : ''})`);
+    }
+    assert.deepEqual(forks, [],
+        `DI params assigned in renderer.js (silent state fork): ${forks.join(', ')}\n` +
+        `Fix: replace \`name = value\` with \`setName(value)\` and add the setter to DI.`);
+});
+
 // ── 23–25. ACTUAL EXECUTION SMOKE TEST ──────────────────────────────────────
 // Loads createRenderer via new Function (strips ESM import/export) so it runs
 // in a CJS test context with fully-stub DI. Proves update() does not throw.
 //
-// ⚠ new Function sloppy-mode hole: the stripped module runs outside strict mode,
-// so reading an undeclared variable evaluates to undefined (sloppy) rather than
-// throwing ReferenceError (strict). This means the smoke alone cannot catch a
-// missing DI param — it would silently receive undefined and might not throw.
-// The compensating layer is eslint no-undef on renderer.js (run at commit time),
-// which IS strict-mode-aware and catches all undeclared reads regardless of the
-// test environment. These two gates together provide the full guarantee:
-// eslint=0 proves no undeclared names; smoke proves update() executes end-to-end.
+// ⚠ new Function sloppy-mode hole: the stripped module runs outside strict mode.
+// Reading an undeclared variable throws ReferenceError in BOTH strict and sloppy
+// mode — only WRITING to an undeclared variable differs (sloppy creates a global;
+// strict throws). So a missing DI param whose value is read will still throw here.
+// The hole is the opposite: an undeclared DI param name that is only ever written
+// (assigned) would silently create a global instead of throwing, making the smoke
+// pass when the ES-module would have thrown at the assignment site. The compensating
+// layer is eslint no-undef on renderer.js (enforced at commit time), which catches
+// every undeclared read AND write regardless of assignment-vs-read. These two gates
+// together provide the full guarantee: eslint=0 proves no undeclared names; smoke
+// proves update() executes end-to-end without ReferenceError on the read paths.
 //
 // RED at d475899: first execution would crash with
 //   ReferenceError: ACCENT_NOTE_FILL_BOOST is not defined
@@ -454,8 +499,13 @@ test('_CV_KEY_TIME_MUL and _CV_KEY_TIME_SLOT are declared in screen.js before _e
             activePalette: new Array(NSTR).fill(0xffffff),
             anchorLaneBoundsAt: () => null, anchorPlayedFretSpanAt: () => null,
             boardSpanX: 1, chordShapeSignature: () => '',
-            _drawAnchors: [], _drawChordTemplates: [], _drawNextByString: new Array(NSTR).fill(null),
-            _drawRecentByString: new Array(NSTR).fill(null), _drawTeachingMarks: [],
+            // Shared-mutable-state pairs (Creed re-check fix: was plain-value shorthands)
+            getDrawAnchors: () => [], setDrawAnchors: N,
+            getDrawChordTemplates: () => [], setDrawChordTemplates: N,
+            getDrawNextByString: () => new Array(NSTR).fill(null), setDrawNextByString: N,
+            getDrawRecentByString: () => new Array(NSTR).fill(null), setDrawRecentByString: N,
+            getDrawTeachingMarks: () => false, setDrawTeachingMarks: N,
+            getShowFingerHints: () => false, setShowFingerHints: N,
             _encodeChordVerdictKey: (t, s, f) => `${t}_${s}_${f}`,
             _firstEventTimeGreaterThan: () => Infinity,
             fretColumnMarkerCadence: 0, fretColumnMarkersForAnchor: () => [],
@@ -466,7 +516,7 @@ test('_CV_KEY_TIME_MUL and _CV_KEY_TIME_SLOT are declared in screen.js before _e
             imFHTech: null, imFHXFill: null, imFHXLines: null,
             imPMTech: null, imPMXFill: null, imPMXLines: null,
             laneBoundsFromAnchor: () => ({ lo: 0, hi: 12 }), sectionLabelsOnHighway: false,
-            _showFingerHints: () => false, updateStringHighlights: N,
+            updateStringHighlights: N,
             _noteKey: (t, s) => `${t}_${s}`,
             bendChevronMat: () => null, darkenHex: (h) => h, slideArrowMat: () => null,
             triMat: () => null, palmMuteXSpriteMat: () => null,
@@ -627,5 +677,25 @@ test('_CV_KEY_TIME_MUL and _CV_KEY_TIME_SLOT are declared in screen.js before _e
             assert.notStrictEqual(e.constructor, ReferenceError,
                 `update() backward seek must not throw ReferenceError: ${e.message}`);
         }
+    });
+
+    // Kill test — shared-state setter pairs actually mutate backing store (Creed re-check)
+    test('kill test: setDrawNextByString call mutates backing store (not a local fork)', () => {
+        // RED at a55dca7: `_drawNextByString = nextNoteByString` wrote the DI local only;
+        //   backing store (screen.js closure) stayed at sentinel null — drawNote saw stale null.
+        // GREEN here: `setDrawNextByString(nextNoteByString)` calls the setter in the DI,
+        //   which updates the backing let. Sentinel = null (same as initial screen.js value).
+        //   After one update() with a future note, drawNextByString_store must be non-null.
+        const SENTINEL = null;
+        let drawNextByString_store = SENTINEL;
+        const di = _makeDI();
+        di.setDrawNextByString = (v) => { drawNextByString_store = v; };
+        di.getDrawNextByString = () => drawNextByString_store;
+        const renderer = _createRenderer(di);
+        const futureNote = { t: 10, s: 0, f: 5, sus: 0, ho: false, po: false };
+        try { renderer.update(_makeBundle({ notes: [futureNote] })); } catch (_) {}
+        assert.notStrictEqual(drawNextByString_store, SENTINEL,
+            `setDrawNextByString was never called — backing store stayed at sentinel null. ` +
+            `RED at a55dca7 (plain assignment forked the DI local). GREEN here: setter call.`);
     });
 }
