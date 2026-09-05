@@ -3,9 +3,9 @@
 // Factory pattern: createNoteRenderer({DI}) → { drawNote, drawArpBrackets, drawNotedetectLabels, chordHarmonyLabels }
 // chordHarmonyLabels is also called from update() (U-section) at line 9016.
 //
-// DI surface: 136 params
+// DI surface: 130 params
 //   - 27 constants (shorthand)
-//   - 30 fn-refs (shorthand)
+//   - 24 fn-refs (shorthand)
 //   - 69 getters (() => _var arrows)
 //   - 3 setters ((v) => { _var = v; } arrows)
 //   - 7 stable refs (by-ref mutate only, shorthand)
@@ -20,13 +20,7 @@
 // entry. Read-write vars (_streakHits, _ndVerdictSawAlpha, _ndVerdictMaxAlpha) use
 // getter/setter inline so writes propagate correctly across notes within a frame.
 
-import {
-    dZ, slideTrailEnd, lowerBoundT, geoFretX, geoFretMid,
-    renderOrderForLayerAtZ,
-    RENDER_ORDER_LAYER_STACK, RENDER_ORDER_LAYER_INDEX,
-    RENDER_ORDER_AT_Z_ZERO, RENDER_ORDER_FAR_CLAMP,
-    _noteKey,
-} from './geometry.js'; // h3d-carve-14
+import { dZ, slideTrailEnd, renderOrderForLayerAtZ } from './geometry.js'; // h3d-carve-14
 
 export function createNoteRenderer({
     // ── Constants ──────────────────────────────────────────────────────────
@@ -43,13 +37,12 @@ export function createNoteRenderer({
     TS, _ND_TIME_EPS,
     // ── Function refs ──────────────────────────────────────────────────────
     slideOffsetWorldX, hwyPostHitTailFadeMul, anchorLaneBoundsAt,
-    validString, sY, xFretMid, xFret,
-    _firstEventTimeGreaterThan, _setLabelMap, pbBeg, pbEnd,
+    validString, sY, xFretMid,
+    _firstEventTimeGreaterThan, _setLabelMap,
     _spriteMat2MeshMat, _meshMatForGhostFretDigit,
-    arpeggioChordIdForNoteWithInferCache, arpHsBoundsForNote, chordWireHighDensity,
     fretLabelScaleForFret, fretMid,
     txtMat, darkenHex,
-    palmMuteXSpriteMat, fretHandMuteXSpriteMat, muteXMat,
+    palmMuteXSpriteMat, fretHandMuteXSpriteMat,
     triMat, bendChevronMat, slideArrowMat,
     pinchHarmonicMat, naturalHarmonicMat,
     _timingHex, _sparkBurst, _fxSpawnPop,

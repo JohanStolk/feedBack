@@ -37,7 +37,7 @@ test('screen.js imports createNoteRenderer from note-renderer.js', () => {
         'screen.js must import createNoteRenderer');
 });
 
-test('screen.js wiring block contains all 136 DI params', () => {
+test('screen.js wiring block contains all 130 DI params', () => {
     // Locate the wiring call; count getter arrows, setter arrows, and
     // shorthand entries. Each property in the object literal is one entry.
     // Strategy: extract the createNoteRenderer({...}) call text and count.
@@ -62,9 +62,11 @@ test('screen.js wiring block contains all 136 DI params', () => {
     }, 0);
 
     const total = getterCount + setterCount + shorthandCount;
-    // 137 = 27 constants + 31 fn-refs + 7 stable-refs (shorthands:65) + 69 getters + 3 setters
-    assert.strictEqual(total, 137,
-        `DI param count must be exactly 137 (got getters:${getterCount} setters:${setterCount} shorthands:${shorthandCount} = ${total})`);
+    // 130 = 27 constants + 24 fn-refs + 7 stable-refs (shorthands:58) + 69 getters + 3 setters
+    // (7 dead fn-refs removed in Toby r1 fix: xFret, pbBeg, pbEnd,
+    //  arpeggioChordIdForNoteWithInferCache, arpHsBoundsForNote, chordWireHighDensity, muteXMat)
+    assert.strictEqual(total, 130,
+        `DI param count must be exactly 130 (got getters:${getterCount} setters:${setterCount} shorthands:${shorthandCount} = ${total})`);
 });
 
 // ── 2. Factory returns all 4 exports ────────────────────────────────────────
@@ -223,4 +225,191 @@ test('screen.js no longer contains raw drawNote function body', () => {
     ];
     assert.strictEqual(drawNoteBodyMatches.length, 0,
         'screen.js must not declare function drawNote after carve-14');
+});
+
+// ── 7. Behavioral kill — drawNote early-exit vs gem path ────────────────────
+// Loads createNoteRenderer via new Function (strips ESM import/export so it
+// runs in a CJS context) with full DI stubs, then calls drawNote directly.
+// Tracks pool.get() calls on the pNote pool to distinguish the early-exit
+// path (no gem emitted) from the in-window gem path (pNote.get() × 2).
+//
+// Kill proof:
+//   Gut line 452  (`return` in the smart-cull block) → negative test RED
+//   Gut pNote.get() at lines 826+873                 → positive test RED
+
+const _nrSrcStripped = (() => {
+    const raw = src; // already read above as fs.readFileSync(NOTE_RENDERER_JS)
+    return raw
+        // Strip the single ESM import line (including trailing comment); geometry stubs come from outer fn params
+        .replace(/^import\s+\{[^}]+\}\s+from\s+['"][^'"]+['"][^\n]*/m, '')
+        .replace('export function createNoteRenderer', 'function createNoteRenderer');
+})();
+
+// Build the factory via new Function so geometry imports come from params (closure).
+// new Function executes in global scope → Math/Map/Set/Array/… are all available.
+const _createNoteRendererFn = new Function(
+    'dZ', 'slideTrailEnd', 'renderOrderForLayerAtZ',
+    _nrSrcStripped + '\nreturn createNoteRenderer;',
+)(() => 0, () => null, () => 0);
+
+function _buildDrawNote(overrides) {
+    let pNoteGetCount = 0;
+    const fakeMat = { opacity: 1, depthTest: true };
+    const fakeMesh = {
+        position: { set: () => {} },
+        rotation: { set: () => {}, z: 0 },
+        scale: { set: () => {}, multiplyScalar: () => {} },
+        renderOrder: 0, visible: true, material: fakeMat, geometry: null,
+    };
+    const pNotePool = { get: () => { pNoteGetCount++; return fakeMesh; }, release: () => {} };
+    const noopPool  = { get: () => fakeMesh, release: () => {} };
+    const A6 = (v) => [v, v, v, v, v, v];
+
+    const di = Object.assign({
+        // Constants
+        K: 1, NFRETS: 24, NW: 1, NH: 0.1, AHEAD: 1,
+        GHOST_HOLD_AFTER_ONSET: 0.1, NEXT_ON_STRING_T_EPS: 0.001,
+        NOTEDETECT_GEM_VERDICT_WINDOW: 0.3,
+        SLIDE_RIBBON_SAMPLES: 8, S_GAP: 1,
+        BEND_HALFSTEP_WORLD_Y: 0.1, PROJ_WIN: 0.6, PROJ_WIN_G: 0.3, PROJ_GROW_MIN: 0,
+        GHOST_FRET_LBL_FADE_S: 0.1,
+        BEND_ENV_RISE_FRAC: 0.3, BEND_ENV_RELEASE_FRAC: 0.7,
+        VIBRATO_HALF_WAVE_S: 0.1, TREMOLO_BUMP_S: 0.1,
+        ACCENT_RIM_XY_SCALE_MUL: 1, ACCENT_RIM_Z_SCALE_MUL: 1,
+        CHORD_FRAME_RIM_FRAC_H: 0.1, CHORD_FRAME_RIM_MIN: 0.01,
+        FRET_LABEL_GOLD_HEX: '#e8c040', SINGLE_SUS_OFFSETS: [0],
+        TS: 1, _ND_TIME_EPS: 0.001,
+        // Function refs (after r1 fix: 24 live fn-refs)
+        slideOffsetWorldX: () => 0,
+        hwyPostHitTailFadeMul: () => 1,
+        anchorLaneBoundsAt: () => null,
+        validString: (s) => s >= 0 && s < 6,
+        sY: () => 0,
+        xFretMid: () => 0,
+        _firstEventTimeGreaterThan: () => Infinity,
+        _setLabelMap: () => {},
+        _spriteMat2MeshMat: () => fakeMat,
+        _meshMatForGhostFretDigit: () => fakeMat,
+        fretLabelScaleForFret: () => 1,
+        fretMid: () => 0,
+        txtMat: () => fakeMat,
+        darkenHex: (h) => h,
+        palmMuteXSpriteMat: () => fakeMat,
+        fretHandMuteXSpriteMat: () => fakeMat,
+        triMat: () => fakeMat,
+        bendChevronMat: () => fakeMat,
+        slideArrowMat: () => fakeMat,
+        pinchHarmonicMat: () => fakeMat,
+        naturalHarmonicMat: () => fakeMat,
+        _timingHex: () => '#ffffff',
+        _sparkBurst: () => {},
+        _fxSpawnPop: () => {},
+        // Frame-state getters
+        getLeftyCached: () => false,
+        getInvertedCached: () => false,
+        getDrawNextByString: () => null,
+        getDrawRecentByString: () => null,
+        getDrawAnchors: () => null,
+        getDrawChordTemplates: () => null,
+        getDrawTeachingMarks: () => false,
+        getShowFingerHints: () => false,
+        getTextSizeMul: () => 1,
+        getNdGetNoteState: () => null,
+        getNdHasProvider: () => true,
+        getNdHitMarks: () => [],
+        getNdMissMarks: () => [],
+        getNdLabels: () => [],
+        getCam: () => ({}),
+        getProbe: () => null,
+        getCurX: () => 0,
+        getNStr: () => 6,
+        getAccentShellsByString: () => A6([]),
+        getNdVerdictMaxAlpha: () => 0,
+        setNdVerdictSawAlpha: () => {},
+        setNdVerdictMaxAlpha: () => {},
+        getStreakHits: () => 0,
+        setStreakHits: () => {},
+        getGNote: () => ({}),
+        getGNoteGrad: () => A6(null),
+        getActivePalette: () => A6(null),
+        getHitFx: () => 0,
+        getSparks: () => null,
+        getVerdictMarks: () => false,
+        getStreakFx: () => false,
+        getStreakHeat: () => 0,
+        getSlideArrowApproachVisible: () => false,
+        getSlideArrowNeckVisible: () => false,
+        getSlideArrowChainPreviewVisible: () => false,
+        getVibrancyProjOp: () => 0.15,
+        getFretLabelAllowed: () => new Set(),
+        getProjMeshArr: () => null,
+        getProjectionVisible: () => false,
+        getGlowMul: () => 1,
+        getShowFretOnNote: () => false,
+        getFretNumberGhostScope: () => null,
+        // Pool getters — pNote uses the tracking pool; others use noopPool
+        getPNote: () => pNotePool,
+        getPNoteEdge: () => noopPool,
+        getPSus: () => noopPool,
+        getPSusOutline: () => noopPool,
+        getPSusRibbon: () => noopPool,
+        getPSusRibbonOl: () => noopPool,
+        getPTapChevron: () => noopPool,
+        getPAccentHalo: () => noopPool,
+        getPArpBracket: () => noopPool,
+        getPConnectorLine: () => noopPool,
+        getPDropLine: () => noopPool,
+        getPGhostFretLbl: () => noopPool,
+        getPNoteFretLabel: () => noopPool,
+        getPTeachMarkLbl: () => noopPool,
+        getPTechPlane: () => noopPool,
+        // Material getters
+        getMStr: () => A6(fakeMat),
+        getMGlow: () => A6(fakeMat),
+        getMSus: () => fakeMat,
+        getMSusOutline: () => fakeMat,
+        getMHitBright: () => A6(fakeMat),
+        getMHitBrightArrays: () => A6(null),
+        getMmissOutline: () => fakeMat,
+        getMmissEdgeArrays: () => [],
+        getMRimFlash: () => A6(fakeMat),
+        getMAccentHaloNear: () => A6(null),
+        getMAccentOutline: () => A6(fakeMat),
+        getMAccentCore: () => A6(fakeMat),
+        getMStrHitOutline: () => A6(fakeMat),
+        getMHitSusOutline: () => fakeMat,
+        getMWhiteOutline: () => fakeMat,
+        // Stable refs
+        _susVerdictLatch: new Map(),
+        _fwHitIn: new Array(26).fill(0),
+        _fwChordAcc: new Map(),
+        _scrGhostUpcomingCount: new Array(6).fill(0),
+        _rimFlashIn: new Array(6).fill(0),
+        _sparkSeen: new Map(),
+        _frameLabeledKeys: new Set(),
+    }, overrides || {});
+
+    const { drawNote } = _createNoteRendererFn(di);
+    return { drawNote, getPNoteGetCount: () => pNoteGetCount };
+}
+
+test('drawNote: past-linger note exits before pNote.get() (early-exit kill)', () => {
+    // note.t=0, now=999 → dt = -999 << -NOTEDETECT_GEM_VERDICT_WINDOW (0.3)
+    // → _overLinger=true, enters smart-cull block, exits at line 452 before any pNote.get().
+    // Kill proof: gut line 452 `return` → code falls through into gem body → pNoteGetCount > 0 → RED.
+    const { drawNote, getPNoteGetCount } = _buildDrawNote();
+    drawNote({ s: 0, f: 5, t: 0, sus: 0 }, /*now=*/999, 0, false, false, 0.10);
+    assert.strictEqual(getPNoteGetCount(), 0,
+        'pNote.get() must NOT be called when dt is far past the verdict window (early exit)');
+});
+
+test('drawNote: in-window note reaches pNote.get() × 2 (gem-path kill)', () => {
+    // note.t=5, now=5 → dt=0 → _overLinger=false (linger=0.10, deadline=5.10)
+    // → skips smart-cull block entirely → enters gem body → pNote.get() for outline + core.
+    // getNdHasProvider=false so smart-cull block is also bypassed (not _overLinger path).
+    // Kill proof: gut pNote.get() at line 826 or 873 → count drops below 2 → RED.
+    const { drawNote, getPNoteGetCount } = _buildDrawNote({ getNdHasProvider: () => false });
+    drawNote({ s: 0, f: 5, t: 5, sus: 0 }, /*now=*/5, 0, false, false, 0.10);
+    assert.ok(getPNoteGetCount() >= 2,
+        `pNote.get() must be called at least twice (outline + core) for an in-window note (got ${getPNoteGetCount()})`);
 });
