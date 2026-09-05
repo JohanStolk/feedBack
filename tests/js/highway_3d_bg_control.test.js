@@ -256,10 +256,12 @@ test('no private bg-control.js symbol appears bare in screen.js IIFE body', () =
     const bgSrc  = src();
     const scrSrc = screenSrc();
 
-    // All _pc* symbols defined in bg-control.js (functions, lets, consts).
+    // All _pc* identifiers in bg-control.js. Full scan (not just declaration
+    // syntax) so multi-var lets like `let _pcEl, _pcSel, _pcReactive, ...`
+    // on a single line are all captured — the previous declaration-only regex
+    // only matched the first id per statement.
     const defined = new Set(
-        [...bgSrc.matchAll(/\bfunction\s+(_pc\w+)|(?:let|const)\s+(_pc\w+)/g)]
-            .map(m => m[1] || m[2])
+        [...bgSrc.matchAll(/\b(_pc\w+)\b/g)].map(m => m[1])
     );
 
     // Public symbols (in the destructure) are legitimately referenced in screen.js.
