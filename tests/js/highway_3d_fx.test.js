@@ -302,3 +302,56 @@ test('_applyBloom calls setBloomPass/setBloomW/setBloomH/setComposer with mock m
     assert.ok(di.getBloomH() > 0,
         'setBloomH must be called with positive height');
 });
+
+// ── 10. _applyCinematic discriminating test (Creed gap fix) ──────────────────
+test('_applyCinematic sets light intensities per _cinematic flag (both paths)', () => {
+    // Mutation that goes RED: `return` inserted at _applyCinematic entry
+    // → intensities never change → all 4 assertions fail → RED.
+    const di = makeDi();
+    const ambLight = { intensity: 0 };
+    const dirLight = { intensity: 0 };
+    di._state.ambLight = ambLight;
+    di._state.dirLight = dirLight;
+
+    const { _applyCinematic } = loadFxModule(di);
+
+    // Cinematic ON: darken ambient, strengthen key light.
+    di._state._cinematic = true;
+    _applyCinematic();
+    assert.equal(ambLight.intensity, 0.45,
+        'cinematic=true: ambLight.intensity must be 0.45 (darken for emissive pop)');
+    assert.equal(dirLight.intensity, 1.15,
+        'cinematic=true: dirLight.intensity must be 1.15 (stronger key)');
+
+    // Cinematic OFF: standard balanced lighting.
+    di._state._cinematic = false;
+    _applyCinematic();
+    assert.equal(ambLight.intensity, 0.85,
+        'cinematic=false: ambLight.intensity must be 0.85 (standard ambient)');
+    assert.equal(dirLight.intensity, 0.8,
+        'cinematic=false: dirLight.intensity must be 0.8 (standard key)');
+});
+
+// ── 11. _h3dHexOrDefault discriminating test (Creed gap fix) ─────────────────
+test('_h3dHexOrDefault parses valid hex and falls back to BG_DEFAULTS', () => {
+    // Mutation that goes RED: return BG_DEFAULTS.nutColor unconditionally
+    // → valid-hex assertion fails (returns fallback instead of parsed value) → RED.
+    const di = makeDi(); // BG_DEFAULTS.nutColor = '#cccccc'
+    const { _h3dHexOrDefault } = loadFxModule(di);
+
+    // Valid 6-digit hex with # → parsed integer.
+    assert.equal(_h3dHexOrDefault('#a1b2c3', null), 0xa1b2c3,
+        'valid hex string must be parsed to its integer value');
+
+    // Hex without # → regex requires #, so falls back to BG_DEFAULTS.nutColor.
+    assert.equal(_h3dHexOrDefault('a1b2c3', null), parseInt('cccccc', 16),
+        'hex without # must fall back to BG_DEFAULTS.nutColor (regex requires leading #)');
+
+    // Gibberish string → BG_DEFAULTS fallback.
+    assert.equal(_h3dHexOrDefault('not-a-color', null), parseInt('cccccc', 16),
+        'invalid string must fall back to BG_DEFAULTS.nutColor');
+
+    // Explicit defHex overrides BG_DEFAULTS when provided.
+    assert.equal(_h3dHexOrDefault('not-a-color', '#ffffff'), 0xffffff,
+        'invalid string with explicit defHex must use defHex, not BG_DEFAULTS');
+});
