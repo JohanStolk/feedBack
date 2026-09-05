@@ -16,6 +16,7 @@ import { createOverlay } from './src/overlay.js'; // h3d-carve-7
 import { createFx } from './src/fx.js'; // h3d-carve-8
 import { createCamera } from './src/camera.js'; // h3d-carve-9
 import { createScoreFx } from './src/score-fx.js'; // h3d-carve-10
+import { createStringGlow } from './src/string-glow.js'; // h3d-carve-11
 
 (function () {
     'use strict';
@@ -6607,46 +6608,17 @@ import { createScoreFx } from './src/score-fx.js'; // h3d-carve-10
         }
 
         /* ── String glow (called each frame) ────────────────────────────── */
-        function updateStringHighlights(noteState) {
-            // Glow slider scales both the idle floor and anticipation peak,
-            // so glowMul=0 fully silences the per-string emissive pulse.
-            // Vibrancy controls the idle opacity floor — anticipation
-            // still rides on top regardless of vibrancy so play-feedback
-            // through the opacity channel survives even at glowMul=0.
-            //
-            // Folded with the post-noteState mGlow / mAccentCore writes
-            // (was a separate `for (s = 0; s < nStr)` loop in update()),
-            // so the per-string scratch arrays stay hot in L1 across all
-            // material writes for a given string.
-            const BASE_GLOW = 0.02 * glowMul;
-            const MAX_GLOW  = 3.5  * glowMul;
-            const IDLE_OP   = _vibrancyIdleOp;
-            const g = glowMul;
-            const venueGemMul = _venueSceneOverride ? VENUE_GEM_EMISSIVE_MUL : 1;
-
-            for (let s = 0; s < nStr; s++) {
-                const mesh = stringLines[s];
-                if (mesh) {
-                    const intensity = Math.max(
-                        noteState.stringSustain[s] ? 1 : 0,
-                        noteState.stringAnticipation[s] || 0,
-                    );
-                    mesh.material.emissiveIntensity = BASE_GLOW + intensity * MAX_GLOW;
-                    mesh.material.opacity = IDLE_OP + intensity * (1 - IDLE_OP);
-                    mesh.scale.set(1, 1 + intensity * 0.3, 1 + intensity * 0.3);
-                }
-                // Hit-note emissive — same write pattern as the standalone
-                // loop that previously lived at update()'s post-call site.
-                // The glow slider scales it here since this assignment
-                // stomps anything _applyGlow() set statically.
-                const bg = noteState.strGlow[s] * g;
-                if (mGlow[s]) mGlow[s].emissiveIntensity = bg * venueGemMul;
-                if (mAccentCore[s]) {
-                    mAccentCore[s].emissiveIntensity =
-                        (bg + noteState.accentFillBoost[s] * g) * venueGemMul;
-                }
-            }
-        }
+        /* ── h3d-carve-11: R-section (string glow) → src/string-glow.js ── */
+        const { updateStringHighlights } = createStringGlow({
+            VENUE_GEM_EMISSIVE_MUL,
+            getGlowMul:            () => glowMul,
+            getVibrancyIdleOp:     () => _vibrancyIdleOp,
+            getVenueSceneOverride: () => _venueSceneOverride,
+            getNStr:               () => nStr,
+            getStringLines:        () => stringLines,
+            getMGlow:              () => mGlow,
+            getMAccentCore:        () => mAccentCore,
+        });
 
         /* ── Lookahead fret bounds + smooth camera ───────────────────────── */
         // End time of the lookahead window = start of the measure that is
