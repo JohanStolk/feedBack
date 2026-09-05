@@ -42,10 +42,12 @@ test('screen.js imports createRenderer from renderer.js', () => {
         'screen.js must import createRenderer');
 });
 
-test('screen.js wiring block contains expected DI param count (177)', () => {
-    // 177 = 77 getters + 35 setters + 65 shorthands (pinned after r2 phantom/dead-param fixes)
-    // OLD pinned value was 241 (inflated by 44 phantom consts, 2 undefined fn-refs, 16 dead params,
-    // and 2 shadowed locals camAhead/camTau that were re-declared as let inside update()).
+test('screen.js wiring block contains expected DI param count (184)', () => {
+    // 184 = 77 getters + 35 setters + 72 shorthands
+    // 177→184: +7 Creed r1 F3 fixes: TS, S_BASE, FRET_LABEL_GOLD_HEX, FRET_LABEL_IDLE_HEX,
+    //   lookaheadBootstrapTime, lookaheadComputeFretBounds, lookaheadTargetWorldX.
+    // 241→177: removed 44 phantom consts, 2 undefined fn-refs, 16 dead params,
+    //   2 shadowed locals camAhead/camTau.
     const wiringMatch = screenSrc.match(/createRenderer\(\{([\s\S]*?)\}\)/);
     assert.ok(wiringMatch, 'screen.js must contain createRenderer({...}) call');
     const body = wiringMatch[1];
@@ -59,7 +61,7 @@ test('screen.js wiring block contains expected DI param count (177)', () => {
     }, 0);
 
     const total = getterCount + setterCount + shorthandCount;
-    assert.strictEqual(total, 177,
+    assert.strictEqual(total, 184,
         `DI param count mismatch: got ${total} (getters=${getterCount}, setters=${setterCount}, shorthands=${shorthandCount})`);
 });
 
@@ -98,9 +100,10 @@ test('screen.js does not contain function update body (per-frame draw loop)', ()
 
 // ── 3. Renderer exports update ───────────────────────────────────────────────
 
-test('renderer.js return value exports update function', () => {
-    assert.match(src, /return\s*\{\s*update\s*\}/,
-        'createRenderer must return { update }');
+test('renderer.js return value exports update, _prewarmStatic, _prewarmChart', () => {
+    // F1 fix: callers need _prewarmStatic/_prewarmChart from the factory return.
+    assert.match(src, /return\s*\{\s*update\s*,\s*_prewarmStatic\s*,\s*_prewarmChart\s*\}/,
+        'createRenderer must return { update, _prewarmStatic, _prewarmChart }');
 });
 
 // ── 4. Caller-list corrections (contract §6) ─────────────────────────────────
@@ -212,4 +215,94 @@ test('all shorthand identifiers in factory wiring calls are declared in screen.j
         `Shorthand identifiers not declared in screen.js scope (phantoms): ${allMissing.sort().join(', ')}\n` +
         `This test was RED at 7623ad8 on BEAT_HEAD_SEC (44 phantoms). ` +
         `Fix: delete undefined names from both the DI signature and wiring call.`);
+});
+
+// ── 8. Creed r1 execution-readiness guards (RED at 7180eff, GREEN at fix tip) ─
+//
+// Creed r1 review at 7180eff raised THREE HIGH findings — all runtime failures:
+//   F1: _prewarmStatic/_prewarmChart not returned → callers get undefined at
+//       screen.js:7377 and :7461
+//   F2: cameraLockLow/cameraLockZoom free vars in _applyNoteCamTargets → any
+//       fretted note in view triggers ReferenceError (cameraLockLow)
+//   F3: dZ/renderOrderForLayerAtZ not imported from geometry.js; TS/S_BASE/
+//       FRET_LABEL_* not DI'd → chord/beat/lane render paths crash (dZ)
+// Plus: broken camera.js import (3 names not exported from camera.js) →
+//   module-load SyntaxError prevents renderer.js from loading at all.
+//
+// These source-scan guards are RED at 7180eff and GREEN at the fix commit.
+
+test('F1: renderer.js returns _prewarmStatic and _prewarmChart', () => {
+    // RED at 7180eff: return { update } only — prewarm callers crash with TypeError
+    // GREEN at fix tip: return { update, _prewarmStatic, _prewarmChart }
+    assert.match(src, /_prewarmStatic\s*,\s*_prewarmChart/,
+        'return must include _prewarmStatic and _prewarmChart (F1 fix)');
+    assert.match(src, /return\s*\{[^}]*_prewarmStatic/,
+        '_prewarmStatic must be in return statement');
+});
+
+test('F2: _applyNoteCamTargets uses getCameraLockLow() not bare cameraLockLow', () => {
+    // Extract _applyNoteCamTargets body (from function decl to next top-level fn)
+    const fnStart = src.indexOf('function _applyNoteCamTargets(');
+    const fnEnd   = src.indexOf('\nfunction ', fnStart + 1);
+    // Strip line comments so identifiers in comments don't trip the checks
+    const fnBody  = src.slice(fnStart, fnEnd).replace(/\/\/[^\n]*/g, '');
+
+    // RED at 7180eff: cameraLockLow (free var, line 131); getCameraLockLow() absent
+    assert.doesNotMatch(fnBody, /\bcameraLockLow\b(?!\s*\()/,
+        '_applyNoteCamTargets must not read bare cameraLockLow (F2: use getCameraLockLow())');
+    assert.match(fnBody, /getCameraLockLow\(\)/,
+        '_applyNoteCamTargets must call getCameraLockLow() (F2 fix)');
+    assert.doesNotMatch(fnBody, /\bcameraLockZoom\b(?!\s*\()/,
+        '_applyNoteCamTargets must not read bare cameraLockZoom (F2: use getCameraLockZoom())');
+    assert.match(fnBody, /getCameraLockZoom\(\)/,
+        '_applyNoteCamTargets must call getCameraLockZoom() (F2 fix)');
+});
+
+test('F3: renderer.js imports dZ and renderOrderForLayerAtZ from geometry.js', () => {
+    // RED at 7180eff: neither name in geometry.js import — dZ calls crash
+    const importLine = src.match(/import\s*\{[^}]+\}\s*from\s*['"]\.\/geometry\.js['"]/);
+    assert.ok(importLine, 'renderer.js must have a geometry.js import');
+    assert.match(importLine[0], /\bdZ\b/,
+        'geometry.js import must include dZ (F3 fix)');
+    assert.match(importLine[0], /\brenderOrderForLayerAtZ\b/,
+        'geometry.js import must include renderOrderForLayerAtZ (F3 fix)');
+});
+
+test('F3: createRenderer DI includes TS, S_BASE, FRET_LABEL_GOLD_HEX, FRET_LABEL_IDLE_HEX', () => {
+    // RED at 7180eff: none of these in DI signature → undefined in hot render paths
+    const diMatch = src.match(/export function createRenderer\(\{([\s\S]*?)\}\s*\)/);
+    assert.ok(diMatch, 'createRenderer DI signature not found');
+    const di = diMatch[1];
+    for (const name of ['TS', 'S_BASE', 'FRET_LABEL_GOLD_HEX', 'FRET_LABEL_IDLE_HEX']) {
+        assert.match(di, new RegExp(`\\b${name}\\b`),
+            `createRenderer DI must include ${name} (F3 fix)`);
+    }
+});
+
+test('camera import fix: renderer.js does not import lookahead fns from camera.js', () => {
+    // At 7180eff camera.js only exports createCamera; importing the 3 lookahead names
+    // caused: SyntaxError: does not provide an export named 'lookaheadBootstrapTime'
+    // RED at 7180eff: those names in camera.js import → module-load failure
+    // GREEN at fix tip: removed from camera import, added to DI from screen.js
+    const cameraImport = src.match(/import\s*\{[^}]+\}\s*from\s*['"]\.\/camera\.js['"]/);
+    if (cameraImport) {
+        for (const name of ['lookaheadBootstrapTime', 'lookaheadComputeFretBounds', 'lookaheadTargetWorldX']) {
+            assert.doesNotMatch(cameraImport[0], new RegExp(`\\b${name}\\b`),
+                `renderer.js must not import ${name} from camera.js (not exported — causes module-load SyntaxError)`);
+        }
+    }
+    // Verify the 3 names appear in the DI signature instead
+    const diMatch = src.match(/export function createRenderer\(\{([\s\S]*?)\}\s*\)/);
+    assert.ok(diMatch, 'createRenderer DI not found');
+    const di = diMatch[1];
+    for (const name of ['lookaheadBootstrapTime', 'lookaheadComputeFretBounds', 'lookaheadTargetWorldX']) {
+        assert.match(di, new RegExp(`\\b${name}\\b`),
+            `createRenderer DI must include ${name} (camera import fix — DI'd from screen.js instead)`);
+    }
+});
+
+test('F1: screen.js destructures _prewarmStatic and _prewarmChart from createRenderer', () => {
+    // RED at 7180eff: const { update } = createRenderer({...}) — prewarm fns undefined
+    assert.match(screenSrc, /const\s*\{\s*update\s*,\s*_prewarmStatic\s*,\s*_prewarmChart\s*\}/,
+        'screen.js must destructure _prewarmStatic and _prewarmChart from createRenderer return');
 });

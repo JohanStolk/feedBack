@@ -6847,7 +6847,7 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
         // extracted to src/renderer.js (createRenderer factory).
         // HONEST GAPS: _prewarmStatic/_prewarmChart need ren.compile() — documented
         // in renderer.js with ponytail: comments.
-        const { update } = createRenderer({
+        const { update, _prewarmStatic, _prewarmChart } = createRenderer({
             // ── Consts ─────────────────────────────────────────────────────
             K, NFRETS, NW, NH, AHEAD, BEHIND, S_GAP,
             CAM_FOCUS_BLEND_RATE,
@@ -6859,6 +6859,7 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
             INLAY_LABEL_FRETS,
             GHOST_HOLD_AFTER_ONSET,
             CHORD_FRAME_RIM_MIN, CHORD_FRAME_RIM_FRAC_H,
+            TS, S_BASE, FRET_LABEL_GOLD_HEX, FRET_LABEL_IDLE_HEX,
             // ── Fn-refs ─────────────────────────────────────────────────────
             sY, xFret, xFretMid, fretLabelScaleForFret, pbBeg, pbEnd, pbReportTick,
             hwyFirstRelevantFrettedTime, _syncOpenStringPitchLabels, txtMat, _setLabelMap,
@@ -6866,6 +6867,7 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
             drawNote, drawArpBrackets, chordHarmonyLabels,
             // createCamera outputs:
             camUpdate,
+            lookaheadBootstrapTime, lookaheadComputeFretBounds, lookaheadTargetWorldX,
             // createArp outputs:
             chordWireHighDensity, chordTemplateLabel, chordTemplateMarkedArpeggio,
             chordHandShapeArpeggioHint,

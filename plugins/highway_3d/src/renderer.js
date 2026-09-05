@@ -4,12 +4,7 @@
 // VERBATIM-MOVE rule: function bodies moved exactly; only DI rewires applied.
 // Call-argument fidelity gate: every moved call verified against baseline.
 
-import { lowerBoundT, camBaseDistU, camLowFretPullbackU } from './geometry.js';
-import {
-    lookaheadBootstrapTime,
-    lookaheadComputeFretBounds,
-    lookaheadTargetWorldX,
-} from './camera.js';
+import { lowerBoundT, camBaseDistU, camLowFretPullbackU, dZ, renderOrderForLayerAtZ } from './geometry.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 export function createRenderer({
@@ -24,6 +19,7 @@ export function createRenderer({
     INLAY_LABEL_FRETS,
     GHOST_HOLD_AFTER_ONSET,
     CHORD_FRAME_RIM_MIN, CHORD_FRAME_RIM_FRAC_H,
+    TS, S_BASE, FRET_LABEL_GOLD_HEX, FRET_LABEL_IDLE_HEX,
     // camAhead, camTau: re-declared as let vars inside update() — not DI
     // ── Stable fn-refs (shorthand) ────────────────────────────────────────
     sY, xFret, xFretMid, fretLabelScaleForFret, pbBeg, pbEnd, pbReportTick,
@@ -32,6 +28,7 @@ export function createRenderer({
     drawNote, drawArpBrackets, chordHarmonyLabels,
     // createCamera outputs:
     camUpdate,
+    lookaheadBootstrapTime, lookaheadComputeFretBounds, lookaheadTargetWorldX,
     // arp.js outputs (from createArp destructure in screen.js):
     chordWireHighDensity, chordTemplateLabel, chordTemplateMarkedArpeggio,
     chordHandShapeArpeggioHint,
@@ -128,7 +125,7 @@ function lookaheadSmoothCamStep(dtSec, tgtXWorld, tgtSpanInt) {
 //          getPrevLockActive() from the returned value).
 function _applyNoteCamTargets(wX, wSum, distMin, distMax, distGot,
                               camHystF, camDistHystF, skipDistHyst) {
-    const lockActive = cameraLockLow && (!distGot || distMax <= 12);
+    const lockActive = getCameraLockLow() && (!distGot || distMax <= 12);
     if (lockActive) {
         // Locked view: frets 0-12 fit in frame, with the peak
         // low-fret bonus baked in so nut chords stay framed.
@@ -141,7 +138,7 @@ function _applyNoteCamTargets(wX, wSum, distMin, distMax, distGot,
         // and MAX (furthest). Default 0.5 maps to ~1.0× so existing
         // users see the same locked view as before this slider.
         const lockZoomMul  = CAM_LOCK_ZOOM_MIN +
-            (CAM_LOCK_ZOOM_MAX - CAM_LOCK_ZOOM_MIN) * cameraLockZoom;
+            (CAM_LOCK_ZOOM_MAX - CAM_LOCK_ZOOM_MIN) * getCameraLockZoom();
         setTgtX(xFretMid(CAM_LOCK_CENTER_FRET));
         setTgtDist((lockedBaseU + lockedBonusU) * K * lockZoomMul);
         setPrevLowFretBonus(lockedBonusU);
@@ -3616,5 +3613,5 @@ function update(bundle) {
     pbEnd(0);
     pbReportTick();
 }
-    return { update };
+    return { update, _prewarmStatic, _prewarmChart };
 }
