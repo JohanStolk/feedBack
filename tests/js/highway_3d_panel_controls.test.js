@@ -112,6 +112,14 @@ function loadHighway3dStatics() {
             _meshMatForGhostFretDigit() {}, _spriteMat2MeshMat() {},
             pool: () => ({ get() {}, reset() {}, warm() { return this; } }),
         }),
+        // h3d-carve-7: overlay (lyrics + HUD) moved to src/overlay.js.
+        createOverlay: () => ({
+            drawChordDiagram() { return 0; },
+            _drawDiagramCached() { return 0; },
+            drawSectionHud() { return 0; },
+            drawToneHud() { return 0; },
+            drawLyrics() { return 0; },
+        }),
     };
     vm.createContext(sandbox);
     vm.runInContext(instrumented, sandbox, { filename: SCREEN_JS });
