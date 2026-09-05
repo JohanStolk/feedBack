@@ -92,6 +92,14 @@ function loadHighway3dStatics() {
         _openStringPitchLabelsForTuning: () => [],
         _ssActive: () => false,
         _ssIsCanvasFocused: () => true,
+        // h3d-carve-4: Butterchurn panel moved to src/bc-panel.js.
+        _bcIsDesktop: () => false,
+        _bcCreateController: (wrap, sizeProvider, audioProvider) => ({
+            applySettings() {}, dead() { return false; }, ready() { return false; },
+            boundAnalyser() { return null; }, audioCtx() { return null; },
+            reconnectAudio() { return false; }, chart() {}, tint() {}, render() {},
+            resize() {}, destroy() {},
+        }),
     };
     vm.createContext(sandbox);
     vm.runInContext(instrumented, sandbox, { filename: SCREEN_JS });
