@@ -140,19 +140,42 @@ test('every symbol returned by createMaterialBuilders is in the screen.js destru
         'createMaterialBuilders returns symbols not in screen.js destructure: ' + leaked.join(', '));
 });
 
-// ── 4. Stale-private guard: _pm/_fhXSpriteMat not bare in screen.js ──────────
-test('_pmXSpriteMat and _fhXSpriteMat do not appear bare in screen.js IIFE body', () => {
-    // Mutation: reference _pmXSpriteMat directly in screen.js body → RED.
-    // These two let vars were factory-scope in the old N-section; now they live
-    // in the materials.js module closure and must not appear in screen.js.
-    const scr = screenSrc();
-    let scrStripped = scr.replace(/^import\s+.*\n/gm, '');
-    scrStripped = stripComments(scrStripped);
-    scrStripped = scrStripped.replace(/const\s*\{[^}]+\}\s*=\s*createMaterialBuilders\s*\([^)]*\)\s*;/, '');
-    for (const sym of ['_pmXSpriteMat', '_fhXSpriteMat']) {
-        assert.doesNotMatch(scrStripped, new RegExp('\\b' + sym + '\\b'),
-            `screen.js must not reference private module var ${sym}`);
+// ── 4. Stale-private guard: factory-private symbols not bare in screen.js ──────
+test('factory-private symbols in materials.js do not appear bare in screen.js', () => {
+    // Mutation: add bare TXT_STYLES to screen.js body → violations=['TXT_STYLES'] → RED.
+    // Kills the whole class: any factory-depth-1 const/let NOT in the return set
+    // must not leak into screen.js. Catches TXT_STYLES, _pmXSpriteMat, _fhXSpriteMat
+    // and any future factory-private additions automatically.
+    const matSrc = stripComments(src());
+    const scrRaw = screenSrc();
+
+    // Extract the returned symbol set (reuse test 3's anchor).
+    const retMatch = matSrc.match(/return\s*\{\s*\n\s*(txtMat\s*,[\s\S]+?)\n\s*\};/);
+    assert.ok(retMatch, 'return block must be present');
+    const returned = new Set(
+        retMatch[1].split(',').map(s => s.trim()).filter(Boolean)
+    );
+
+    // Factory-depth-1 const/let declarations: exactly 4-space indent.
+    // These are factory-private vars (_pmXSpriteMat, _fhXSpriteMat, TXT_STYLES …).
+    // Depth-2 locals (const T = getT() etc.) have 8+ spaces — excluded by anchor.
+    const privateSyms = [];
+    for (const m of matSrc.matchAll(/^ {4}(?:const|let)\s+(\w+)/gm)) {
+        const sym = m[1];
+        if (!returned.has(sym)) privateSyms.push(sym);
     }
+    assert.ok(privateSyms.length > 0, 'factory must have at least one private depth-1 declaration');
+
+    // Strip screen.js of import lines, comments, and the destructure line.
+    let scr = scrRaw.replace(/^import\s+.*\n/gm, '');
+    scr = stripComments(scr);
+    scr = scr.replace(/const\s*\{[^}]+\}\s*=\s*createMaterialBuilders\s*\([^)]*\)\s*;/, '');
+
+    const violations = privateSyms.filter(sym =>
+        new RegExp('\\b' + sym + '\\b').test(scr)
+    );
+    assert.deepStrictEqual(violations, [],
+        'screen.js must not reference factory-private materials.js symbols: ' + violations.join(', '));
 });
 
 // ── 5. DI: T is accessed via getT() at call time, not factory construction ───
