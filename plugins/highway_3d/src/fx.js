@@ -99,44 +99,51 @@ export function createFx({
         _sparkPts.geometry.attributes.color.needsUpdate = true;
         _sparkPts.visible = any;
     }
+    // #4 Bloom — .then() body extracted for test harness reach (Toby r1 F1).
+    // Called with [EC, RP, UB, OP] when all four postprocessing modules resolve.
+    // DI rewire: T/ren/scene/cam/highwayCanvas from live-accessors (per-call).
+    function _applyBloom([EC, RP, UB, OP]) {
+        // VERBATIM MOVE of the .then() handler body from _bloomEnsure.
+        // DI rewire: T/ren/scene/cam/highwayCanvas read from live-accessors.
+        try {
+            const T = getT(), highwayCanvas = getHighwayCanvas();
+            const ren = getRen(), scene = getScene(), cam = getCam();
+            const sz = canvasSize(highwayCanvas) || { w: 1280, h: 720 };
+            const w = Math.max(2, sz.w | 0), h = Math.max(2, sz.h | 0);
+            // Multisampled (WebGL2 MSAA) HalfFloat target so anti-aliasing
+            // survives the bloom path — EffectComposer's default target has no
+            // `samples`, which is why bloom-on looked jagged (worst on non-Retina
+            // DPR1 displays that have no supersampling cushion).
+            const _bloomRT = new T.WebGLRenderTarget(w, h, { type: T.HalfFloatType, samples: 4 });
+            const comp = new EC.EffectComposer(ren, _bloomRT);
+            comp.addPass(new RP.RenderPass(scene, cam));
+            const bp = new UB.UnrealBloomPass(new T.Vector2(w, h), 0.65, 0.5, 0.82); // strength, radius, threshold (high → only emissive blooms)
+            setBloomPass(bp);
+            comp.addPass(bp);
+            comp.addPass(new OP.OutputPass());
+            comp.setSize(w, h);
+            setBloomW(w); setBloomH(h); setComposer(comp);
+        } catch (e) { console.warn('[3D-Hwy] bloom init failed', e); setComposer(null); }
+    }
     // #4 Bloom: lazy-load the vendored postprocessing addons and build an
     // EffectComposer (RenderPass -> UnrealBloomPass -> OutputPass/ACES). Returns
     // the composer once ready, or null (caller falls back to a direct render).
     function _bloomEnsure() {
         // VERBATIM MOVE. DI rewire: all factory-scope vars via get/set accessors.
-        // _composer, _bloomLoad, _bloomPass, _bloomW, _bloomH are REASSIGNED here
-        // so setters are required — these must NOT silently become locals.
+        // _composer, _bloomLoad, _bloomPass, _bloomW, _bloomH are REASSIGNED via
+        // _applyBloom — setters required; must NOT silently become locals.
         if (getComposer()) return getComposer();
         const ren = getRen(), scene = getScene(), cam = getCam();
         if (getBloomLoad() || !ren || !scene || !cam) return null;
-        const T = getT(), highwayCanvas = getHighwayCanvas();
         const A = '/static/vendor/three/addons/';
         setBloomLoad(Promise.all([
             import(A + 'postprocessing/EffectComposer.js'),
             import(A + 'postprocessing/RenderPass.js'),
             import(A + 'postprocessing/UnrealBloomPass.js'),
             import(A + 'postprocessing/OutputPass.js'),
-        ]).then(([EC, RP, UB, OP]) => {
-            try {
-                const sz = canvasSize(highwayCanvas) || { w: 1280, h: 720 };
-                const w = Math.max(2, sz.w | 0), h = Math.max(2, sz.h | 0);
-                // Multisampled (WebGL2 MSAA) HalfFloat target so anti-aliasing
-                // survives the bloom path — EffectComposer's default target has no
-                // `samples`, which is why bloom-on looked jagged (worst on non-Retina
-                // DPR1 displays that have no supersampling cushion).
-                const _bloomRT = new T.WebGLRenderTarget(w, h, { type: T.HalfFloatType, samples: 4 });
-                const comp = new EC.EffectComposer(ren, _bloomRT);
-                comp.addPass(new RP.RenderPass(scene, cam));
-                const bp = new UB.UnrealBloomPass(new T.Vector2(w, h), 0.65, 0.5, 0.82); // strength, radius, threshold (high → only emissive blooms)
-                setBloomPass(bp);
-                comp.addPass(bp);
-                comp.addPass(new OP.OutputPass());
-                comp.setSize(w, h);
-                setBloomW(w); setBloomH(h); setComposer(comp);
-            } catch (e) { console.warn('[3D-Hwy] bloom init failed', e); setComposer(null); }
-        }).catch((e) => console.warn('[3D-Hwy] bloom modules failed', e)));
+        ]).then(_applyBloom).catch((e) => console.warn('[3D-Hwy] bloom modules failed', e)));
         return null;
     }
 
-    return { _h3dHexOrDefault, _applyCinematic, _timingHex, _sparkBurst, _sparkUpdate, _bloomEnsure };
+    return { _h3dHexOrDefault, _applyCinematic, _timingHex, _sparkBurst, _sparkUpdate, _applyBloom, _bloomEnsure };
 }

@@ -6381,7 +6381,7 @@ import { createFx } from './src/fx.js'; // h3d-carve-8
 
         /* ── h3d-carve-8: Q-helpers (lighting/FX) → src/fx.js ─────────── */
         /* buildBoard deferred: see plans/highway3d-carve.md §3 row 16.  */
-        const { _h3dHexOrDefault, _applyCinematic, _timingHex, _sparkBurst, _sparkUpdate, _bloomEnsure } = createFx({
+        const { _h3dHexOrDefault, _applyCinematic, _timingHex, _sparkBurst, _sparkUpdate, _applyBloom, _bloomEnsure } = createFx({
             BG_DEFAULTS, K,
             getT: () => T,
             getAmbLight: () => ambLight, getDirLight: () => dirLight, getCinematic: () => _cinematic,

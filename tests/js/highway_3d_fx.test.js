@@ -3,17 +3,18 @@
 //
 // Class-killers guaranteed:
 //   1. Module exports createFx (source)
-//   2. createFx return set covers all 6 required symbols (source)
+//   2. createFx return set covers all 7 required symbols (source)
 //   3. Stranded-caller: every returned symbol in screen.js destructure (source)
 //   4. Private-guard: factory-depth-1 privates not bare in screen.js (source)
 //   5. _timingHex returns EARLY tint when ts='EARLY' and _timingFx truthy (behavioural)
 //   6. _sparkBurst writes to getSparkPos() array NOT a stale init-time capture
 //      (live-accessor class-killer: set new arrays after factory init → RED if stale-cached)
-//   7. _sparkUpdate sets .visible on getSparkPts() object (live-accessor)
+//   7. _sparkUpdate sets needsUpdate=true on pts reached via live getSparkPts()
+//      (F2 fix: AND assertions; no longer vacuously true via .visible === false)
 //   8. _bloomEnsure calls setBloomLoad (synchronous write-back: assignment silenced → RED)
 //  8b. _bloomEnsure reads getComposer() live (not init-cached: setComposer after init → RED)
-//  GAP: setComposer(comp) inside the async .then() is not tested synchronously —
-//       would require mocking dynamic import(); declared to Toby/Creed for assessment.
+//   9. _applyBloom calls all 4 write-backs (setBloomPass/setBloomW/setBloomH/setComposer)
+//      (F1 fix: named function testable with mock modules; each sever → RED)
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -39,7 +40,7 @@ test('fx.js exports createFx', () => {
 // ── 2. Return set covers all 6 required symbols ──────────────────────────────
 test('createFx returns all 6 required symbols', () => {
     const stripped = stripComments(src());
-    const REQUIRED = ['_h3dHexOrDefault', '_applyCinematic', '_timingHex', '_sparkBurst', '_sparkUpdate', '_bloomEnsure'];
+    const REQUIRED = ['_h3dHexOrDefault', '_applyCinematic', '_timingHex', '_sparkBurst', '_sparkUpdate', '_applyBloom', '_bloomEnsure'];
     // Factory-level return block: 4-space indent inside createFx body.
     const retMatch = stripped.match(/\n {4}return\s*\{\s*([^}]+)\}/);
     assert.ok(retMatch, 'factory-level return block must be present');
@@ -184,32 +185,38 @@ test('_sparkBurst writes to the sparkPos array returned by getSparkPos (live, no
         'if 0 it cached the initial array at factory init time (live-accessor broken)');
 });
 
-// ── 7. _sparkUpdate live-accessor class-killer ────────────────────────────────
-test('_sparkUpdate reads sparkPts from getter each call (not init-cached)', () => {
-    // Mutation: if getSparkPts() result is cached at factory init, setSparkPts(newPts)
-    // after init → _sparkUpdate still references stale (null) pts → .visible never set.
+// ── 7. _sparkUpdate live-accessor class-killer (F2 fix) ───────────────────────
+test('_sparkUpdate sets needsUpdate=true on pts reached via live getSparkPts()', () => {
+    // Mutation that goes RED: if getSparkPts() result is cached at factory init,
+    // setSparkPts(newPts) after init → _sparkUpdate still references stale (null) pts
+    // → needsUpdate flags never set → BOTH assertions fail → RED.
+    //
+    // F2 fix: previous test used `|| pts.visible === false` which is vacuously true
+    // (no living sparks → visible stays false) — a NO-OP _sparkUpdate passed the test.
+    // Now we assert needsUpdate=true (set unconditionally after the loop) via AND.
     const di = makeDi();
     const { _sparkUpdate } = loadFxModule(di);
 
-    // No sparkPts yet — _sparkUpdate should short-circuit.
-    _sparkUpdate(0.016);  // must not throw
+    // No sparkPts yet — short-circuit (must not throw).
+    _sparkUpdate(0.016);
 
-    // Now provide sparkPts (simulates buildBoard completing).
+    // Now provide sparkPts (simulates buildBoard completing after factory init).
     const pts = {
         geometry: { attributes: {
             position: { needsUpdate: false },
             color: { needsUpdate: false },
         }},
-        visible: false,
+        visible: true,
     };
     di.setSparkPts(pts);
     _sparkUpdate(0.016);
 
-    // Even with no living sparks, the needsUpdate flags must have been set.
-    assert.ok(pts.geometry.attributes.position.needsUpdate === true ||
-              pts.geometry.attributes.color.needsUpdate === true ||
-              pts.visible === false,
-        '_sparkUpdate must reach the pts object provided via setSparkPts after factory init');
+    // _sparkUpdate sets needsUpdate unconditionally after the particle loop.
+    // If _sparkUpdate cached the stale null ptr at factory init, both stay false.
+    assert.ok(pts.geometry.attributes.position.needsUpdate === true,
+        '_sparkUpdate must set position.needsUpdate=true (reached via live getSparkPts)');
+    assert.ok(pts.geometry.attributes.color.needsUpdate === true,
+        '_sparkUpdate must set color.needsUpdate=true (reached via live getSparkPts)');
 });
 
 // ── 8. _bloomEnsure write-back class-killer: setBloomLoad called ──────────────
@@ -250,4 +257,48 @@ test('_bloomEnsure returns composer set via setComposer (reads live via getCompo
     assert.equal(_bloomEnsure(), fakeComp,
         '_bloomEnsure must return composer set via setComposer; ' +
         'null means it cached the initial null value at factory init time');
+});
+
+// ── 9. _applyBloom calls all 4 write-backs (F1 fix) ──────────────────────────
+test('_applyBloom calls setBloomPass/setBloomW/setBloomH/setComposer with mock modules', () => {
+    // Mutation scenarios (all 4 must go RED when severed individually):
+    //   sever setBloomPass(bp) → getBloomPass() stays null → RED
+    //   sever setBloomW(w)     → getBloomW() stays 0      → RED
+    //   sever setBloomH(h)     → getBloomH() stays 0      → RED
+    //   sever setComposer(comp)→ getComposer() stays null  → RED
+    //
+    // F1 Toby fix: _applyBloom is named at factory scope and in the return set,
+    // so the harness calls it directly with mock [EC, RP, UB, OP] — no import() needed.
+    const di = makeDi();
+    di._state.T = {
+        WebGLRenderTarget: function(w, h, opts) { return { _w: w, _h: h }; },
+        HalfFloatType: 1,
+        Vector2: function(w, h) { return { w, h }; },
+    };
+    di._state.ren = { isRenderer: true };
+    di._state.scene = { isScene: true };
+    di._state.cam = { isCamera: true };
+
+    const { _applyBloom } = loadFxModule(di);
+
+    // Mock module objects matching the destructure [EC, RP, UB, OP].
+    const fakeComp = { addPass() {}, setSize() {} };
+    const fakePass = { isBloomPass: true };
+    const mods = [
+        { EffectComposer: function(ren, rt) { return fakeComp; } },
+        { RenderPass: function(scene, cam) { return {}; } },
+        { UnrealBloomPass: function(v2, s, r, t) { return fakePass; } },
+        { OutputPass: function() { return {}; } },
+    ];
+
+    _applyBloom(mods);
+
+    assert.equal(di.getComposer(), fakeComp,
+        'setComposer must be called: if severed, getComposer() stays null → bloom never activates');
+    assert.equal(di.getBloomPass(), fakePass,
+        'setBloomPass must be called: if severed, pass ref lost → resize/tuning broken');
+    assert.ok(di.getBloomW() > 0,
+        'setBloomW must be called with positive width');
+    assert.ok(di.getBloomH() > 0,
+        'setBloomH must be called with positive height');
 });
