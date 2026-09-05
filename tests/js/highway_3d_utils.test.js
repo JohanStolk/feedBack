@@ -96,25 +96,34 @@ test('_lightenInt: mixing pure black toward white by 1.0 yields white', () => {
 
 // ── resolveStringCount ────────────────────────────────────────────────────────
 
-test('resolveStringCount: uses bundle.stringCount and clamps to 6', () => {
+test('resolveStringCount: uses bundle.stringCount and clamps to maxStrings', () => {
     // Mutation: remove Math.min → returns 8 for a chart that declares 8 strings;
-    // _NOTE_NAMES_SHARP lookup and per-string material arrays index OOB.
-    assert.strictEqual(fns().resolveStringCount({ stringCount: 8 }), 6,
-        'stringCount=8 exceeds MAX_RENDER_STRINGS=6; must clamp to 6');
-    assert.strictEqual(fns().resolveStringCount({ stringCount: 4 }), 4);
+    // per-string material arrays index OOB.
+    assert.strictEqual(fns().resolveStringCount({ stringCount: 8 }, 6), 6,
+        'stringCount=8 exceeds maxStrings=6; must clamp');
+    assert.strictEqual(fns().resolveStringCount({ stringCount: 4 }, 6), 4);
+});
+
+test('resolveStringCount: maxStrings param is authoritative, not a hardcoded 6', () => {
+    // Mutation: re-hardcode maxStrings=6 inside utils.js → resolveStringCount({stringCount:7}, 7)
+    // returns 6; 7th-string notes are silently never drawn and no test fails.
+    assert.strictEqual(fns().resolveStringCount({ stringCount: 7 }, 7), 7,
+        'maxStrings=7 must allow stringCount=7 through without clamping to a hardcoded 6');
+    assert.strictEqual(fns().resolveStringCount({ stringCount: 10 }, 7), 7,
+        'stringCount exceeding maxStrings must clamp to maxStrings, not 6');
 });
 
 test('resolveStringCount: falls back to 4 for bass arrangement', () => {
     // Mutation: remove /bass/i test → bass charts get 6 strings; 5th/6th string
     // material slots are undefined and T.WebGLRenderer calls throw.
     assert.strictEqual(
-        fns().resolveStringCount({ songInfo: { arrangement: 'Bass' } }),
+        fns().resolveStringCount({ songInfo: { arrangement: 'Bass' } }, 6),
         4,
         'arrangement containing "Bass" must fall back to 4 strings');
 });
 
 test('resolveStringCount: defaults to NSTR=6 when bundle has no string info', () => {
-    assert.strictEqual(fns().resolveStringCount({}), 6);
+    assert.strictEqual(fns().resolveStringCount({}, 6), 6);
 });
 
 // ── _NOTE_NAMES_SHARP ─────────────────────────────────────────────────────────
@@ -155,11 +164,13 @@ test('_midiToPitchLabel: MIDI 60 = C4, MIDI 69 = A4', () => {
 // ── _openStringPitchLabelsForTuning ──────────────────────────────────────────
 
 test('_openStringPitchLabelsForTuning: standard guitar in E returns correct labels', () => {
-    // Smoke: 6 zero-offset strings with guitar6 MIDI base.
+    // Smoke: 6 zero-offset strings with guitar6 MIDI base. maxStrings=6 passed explicitly
+    // (mirrors the delegator in screen.js which supplies MAX_RENDER_STRINGS).
     const labels = fns()._openStringPitchLabelsForTuning(
         { tuning: [0, 0, 0, 0, 0, 0], capo: 0, stringCount: 6 },
         { arrangement: 'Lead' },
         6,
+        6, // maxStrings
     );
     assert.deepStrictEqual(labels, ['E2', 'A2', 'D3', 'G3', 'B3', 'E4'],
         'standard guitar open-string labels must be E2-A2-D3-G3-B3-E4');
@@ -188,10 +199,24 @@ test('screen.js imports all Cut 3 utils from src/utils.js', () => {
     assert.match(src,
         /import\s+\{[^}]*_ssActive[^}]*\}\s+from\s+['"]\.\/src\/utils\.js['"]/,
         'screen.js must import _ssActive (and other utils) from ./src/utils.js');
-    assert.match(src, /resolveStringCount/,
-        'resolveStringCount must appear in the utils.js import line');
+    assert.match(src, /_resolveStringCountBase/,
+        'resolveStringCount must be imported with an alias so the delegator can shadow it');
     assert.match(src, /_h3dHexToInt/,
         '_h3dHexToInt must appear in the utils.js import line');
+});
+
+test('screen.js delegator passes MAX_RENDER_STRINGS to resolveStringCount', () => {
+    // Mutation: delegator omits MAX_RENDER_STRINGS → resolveStringCount called with
+    // maxStrings=undefined; Math.min(sc, undefined)=NaN; string count is always NaN.
+    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    assert.match(src, /_resolveStringCountBase\s*\(.*MAX_RENDER_STRINGS/,
+        'delegator must supply MAX_RENDER_STRINGS so palette growth is auto-respected');
+});
+
+test('screen.js delegator passes MAX_RENDER_STRINGS to _openStringPitchLabelsForTuning', () => {
+    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    assert.match(src, /_openStringPitchLabelsForTuningBase\s*\(.*MAX_RENDER_STRINGS/,
+        'delegator must forward MAX_RENDER_STRINGS as the maxStrings argument');
 });
 
 test('screen.js IIFE no longer declares the moved symbols', () => {

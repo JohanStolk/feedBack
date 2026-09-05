@@ -8,7 +8,7 @@
 
 import { geoFretX, dZ, slideTrailEnd, camBaseDistU, camLowFretPullbackU, computeBPM, _makeGaussTex, RENDER_ORDER_LAYER_STACK, RENDER_ORDER_LAYER_INDEX, RENDER_ORDER_AT_Z_ZERO, RENDER_ORDER_FAR_CLAMP, renderOrderForLayerAtZ, _noteKey, lowerBoundT, hwyFirstRelevantFrettedTime, geoFretMid } from './src/geometry.js'; // h3d-carve-1b
 import { loadThree, T } from './src/three-loader.js'; // h3d-carve-2
-import { _h3dHexToInt, _clampByteI, _darkenInt, _lightenInt, resolveStringCount, _NOTE_NAMES_SHARP, _BASE_OPEN_MIDI_BASS4, _BASE_OPEN_MIDI_BASS5, _BASE_OPEN_MIDI_GUITAR6, _BASE_OPEN_MIDI_GUITAR7, _BASE_OPEN_MIDI_GUITAR8, _baseOpenStringMidis, _midiToPitchLabel, _openStringPitchLabelsForTuning, _ssActive, _ssIsCanvasFocused } from './src/utils.js'; // h3d-carve-3
+import { _h3dHexToInt, _clampByteI, _darkenInt, _lightenInt, resolveStringCount as _resolveStringCountBase, _NOTE_NAMES_SHARP, _BASE_OPEN_MIDI_BASS4, _BASE_OPEN_MIDI_BASS5, _BASE_OPEN_MIDI_GUITAR6, _BASE_OPEN_MIDI_GUITAR7, _BASE_OPEN_MIDI_GUITAR8, _baseOpenStringMidis, _midiToPitchLabel, _openStringPitchLabelsForTuning as _openStringPitchLabelsForTuningBase, _ssActive, _ssIsCanvasFocused } from './src/utils.js'; // h3d-carve-3
 
 (function () {
     'use strict';
@@ -782,10 +782,12 @@ import { _h3dHexToInt, _clampByteI, _darkenInt, _lightenInt, resolveStringCount,
     const MAX_RENDER_STRINGS = S_COL.length;
 
     // resolveStringCount — moved to src/utils.js (h3d-carve-3).
+    const resolveStringCount = bundle => _resolveStringCountBase(bundle, MAX_RENDER_STRINGS); // h3d-carve-3: delegator (1 beyond-subst; passes authoritative S_COL.length ceiling)
 
     // _NOTE_NAMES_SHARP, _BASE_OPEN_MIDI_BASS4/5, _BASE_OPEN_MIDI_GUITAR6/7/8 — moved to src/utils.js (h3d-carve-3).
 
     // _baseOpenStringMidis, _midiToPitchLabel, _openStringPitchLabelsForTuning — moved to src/utils.js (h3d-carve-3).
+    const _openStringPitchLabelsForTuning = (bundle, songInfo, n) => _openStringPitchLabelsForTuningBase(bundle, songInfo, n, MAX_RENDER_STRINGS); // h3d-carve-3: delegator (1 beyond-subst)
 
     const STR_THICK = 0.25 * K;
 

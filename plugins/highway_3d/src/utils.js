@@ -7,9 +7,13 @@
  * PALETTES.default / S_COL layout).
  */
 
-// ── Compile-time copies of IIFE constants ─────────────────────────────────────
+// ── Compile-time IIFE constant ────────────────────────────────────────────────
+// NSTR: standard guitar default (not a palette ceiling — safe as a fixed fact).
+// MAX_RENDER_STRINGS is NOT duplicated here; it is the authority of S_COL.length
+// in screen.js and flows in via the maxStrings parameter of resolveStringCount
+// and _openStringPitchLabelsForTuning.  screen.js keeps 1-line delegators that
+// supply MAX_RENDER_STRINGS so zero call-sites change.
 const NSTR = 6;
-const MAX_RENDER_STRINGS = 6; // S_COL.length = PALETTES.default.length
 
 // ── Color utilities ───────────────────────────────────────────────────────────
 
@@ -47,10 +51,10 @@ export function _lightenInt(hex, t) {
  * Clamped to MAX_RENDER_STRINGS so a malformed bundle doesn't index past
  * the per-string material arrays.
  */
-export function resolveStringCount(bundle) {
+export function resolveStringCount(bundle, maxStrings) {
     const sc = bundle && bundle.stringCount;
     if (Number.isFinite(sc) && sc >= 1) {
-        return Math.min(Math.trunc(sc), MAX_RENDER_STRINGS);
+        return Math.min(Math.trunc(sc), maxStrings);
     }
     return /bass/i.test(bundle?.songInfo?.arrangement || '') ? 4 : NSTR;
 }
@@ -102,8 +106,8 @@ export function _midiToPitchLabel(midi) {
  * @param {object} songInfo    WS song_info blob (arrangement, tuning, capo)
  * @param {number} nEffective  String count clamped like nStr / resolveStringCount
  */
-export function _openStringPitchLabelsForTuning(bundle, songInfo, nEffective) {
-    const n = Number.isFinite(nEffective) ? Math.min(Math.max(1, Math.trunc(nEffective)), MAX_RENDER_STRINGS) : resolveStringCount(bundle);
+export function _openStringPitchLabelsForTuning(bundle, songInfo, nEffective, maxStrings) {
+    const n = Number.isFinite(nEffective) ? Math.min(Math.max(1, Math.trunc(nEffective)), maxStrings) : resolveStringCount(bundle, maxStrings);
     // bundle first: chart-transform substitutes tuning/capo there, while
     // songInfo keeps the chart's originals by contract.  A malformed
     // (non-array) bundle.tuning falls back to songInfo instead of
