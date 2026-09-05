@@ -11,13 +11,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
+// h3d-carve-12: chordShapeCoveredByStandaloneNotes moved to src/arp.js
+const ARP_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'arp.js');
 
 test('chordShapeCoveredByStandaloneNotes helper exists with the expected signature', () => {
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    const src = fs.readFileSync(ARP_JS, 'utf8');
     assert.match(
         src,
         /function\s+chordShapeCoveredByStandaloneNotes\s*\(\s*ch\s*,\s*shape\s*,\s*notesArr\s*,\s*timeWin\s*\)/,
-        'helper that scans the note stream for shape coverage must remain on screen.js',
+        'helper that scans the note stream for shape coverage must be in src/arp.js (moved from screen.js by h3d-carve-12)',
     );
 });
 
