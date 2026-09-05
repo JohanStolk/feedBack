@@ -6628,13 +6628,24 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
         // lookaheadTargetWorldX extracted below in the createCamera() destructure.
 
 
+        // h3d-carve-15 F2: _setLabelMap must be in scope before both createNoteRenderer
+        // and createRenderer wiring calls; defined here, passed as DI to both factories.
+        // See renderer.js DI comment for the full explanation.
+        function _setLabelMap(sprite, srcMat) {
+            const m = sprite.material;
+            if (m.map === srcMat.map) return;
+            const nullnessChanged = (m.map == null) !== (srcMat.map == null);
+            m.map = srcMat.map;
+            if (nullnessChanged) m.needsUpdate = true;
+        }
+
         /* ── h3d-carve-14: V-section (note renderer) → src/note-renderer.js ── */
         const { drawNote, drawArpBrackets, drawNotedetectLabels, chordHarmonyLabels } = createNoteRenderer({
             // ── Constants ──────────────────────────────────────────────────
             K, NFRETS, NW, NH, AHEAD,
             GHOST_HOLD_AFTER_ONSET, NEXT_ON_STRING_T_EPS, NOTEDETECT_GEM_VERDICT_WINDOW,
             SLIDE_RIBBON_SAMPLES, S_GAP,
-            BEND_HALFSTEP_WORLD_Y, PROJ_WIN, PROJ_WIN_G, PROJ_GROW_MIN,
+            BEND_HALFSTEP_WORLD_Y, PROJ_GROW_MIN,
             GHOST_FRET_LBL_FADE_S,
             BEND_ENV_RISE_FRAC, BEND_ENV_RELEASE_FRAC,
             VIBRATO_HALF_WAVE_S, TREMOLO_BUMP_S,
@@ -6838,7 +6849,7 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
         // in renderer.js with ponytail: comments.
         const { update } = createRenderer({
             // ── Consts ─────────────────────────────────────────────────────
-            K, NFRETS, NW, NH, AHEAD, BEHIND, S_GAP, S_COL,
+            K, NFRETS, NW, NH, AHEAD, BEHIND, S_GAP,
             CAM_FOCUS_BLEND_RATE,
             CAM_LOCK_ZOOM_MIN, CAM_LOCK_ZOOM_MAX, CAM_LOCK_CENTER_FRET,
             LOOKAHEAD_LOCK_ENGAGE_MAXF, LOOKAHEAD_LOCK_RELEASE_MAXF,
@@ -6846,35 +6857,13 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
             FRET_WIDTH_MID, CAM_TGT_BEHIND, CAM_DIST_BASE,
             VENUE_GEM_EMISSIVE_MUL, NOTEDETECT_GEM_VERDICT_WINDOW,
             INLAY_LABEL_FRETS,
-            GHOST_HOLD_AFTER_ONSET, camAhead, camTau,
-            BEAT_HEAD_SEC, SEC_HEAD_SEC,
-            LANE_BEAT_W, LANE_BEAT_DIV_W, LANE_LANE_W, LANE_OPEN_W, LANE_OPEN_H,
-            CHORD_BOX_LEAD_S, CHORD_BOX_TRAIL_S, CHORD_BOX_FADE_S,
-            CHORD_BOX_FRET_LABEL_THRESH_W,
+            GHOST_HOLD_AFTER_ONSET,
             CHORD_FRAME_RIM_MIN, CHORD_FRAME_RIM_FRAC_H,
-            SLIDE_RIBBON_SAMPLES,
-            HALO_BAR_HALF_H, HALO_BAR_HALF_W,
-            PM_X_BOX_TRAIL_S, PM_X_BOX_LEAD_S,
-            FH_X_BOX_TRAIL_S, FH_X_BOX_LEAD_S,
-            MUTE_X_LINES_TRAIL_S, MUTE_X_LINES_LEAD_S,
-            FH_X_LINES_TRAIL_S, FH_X_LINES_LEAD_S,
-            TECH_PLANE_LEAD_S, TECH_PLANE_TRAIL_S,
-            CONNECTOR_LINE_LEAD_S, CONNECTOR_LINE_TRAIL_S,
-            DROP_LINE_TRAIL_S, DROP_LINE_LEAD_S,
-            SUS_RAIL_LEAD_S, SUS_RAIL_TRAIL_S,
-            FRET_COL_MARKER_LEAD_S, FRET_COL_MARKER_TRAIL_S,
-            TEACH_MARK_LBL_TRAIL_S, TEACH_MARK_LBL_LEAD_S,
-            NOTE_FRET_LABEL_LEAD_S, NOTE_FRET_LABEL_TRAIL_S,
-            GHOST_FRET_LBL_TRAIL_S, GHOST_FRET_LBL_LEAD_S,
-            ARP_BRACKET_LEAD_S, ARP_BRACKET_TRAIL_S,
-            HALO_BAR_LEAD_S, HALO_BAR_TRAIL_S,
-            SEC_LABEL_LEAD_S, SEC_LABEL_TRAIL_S,
-            BARLINE_LEAD_S, BARLINE_TRAIL_S,
             // ── Fn-refs ─────────────────────────────────────────────────────
             sY, xFret, xFretMid, fretLabelScaleForFret, pbBeg, pbEnd, pbReportTick,
-            hwyFirstRelevantFrettedTime, _syncOpenStringPitchLabels, txtMat, fireDrawHooks,
+            hwyFirstRelevantFrettedTime, _syncOpenStringPitchLabels, txtMat, _setLabelMap,
             // createNoteRenderer outputs:
-            drawNote, drawArpBrackets, drawNotedetectLabels, chordHarmonyLabels,
+            drawNote, drawArpBrackets, chordHarmonyLabels,
             // createCamera outputs:
             camUpdate,
             // createArp outputs:
@@ -6888,8 +6877,7 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
             arpeggioLaneOuterRailLaneSlice, arpeggioLaneOuterRailAtChartTime,
             arpeggioLaneDividerFrameAccentMul, arpeggioLaneDividerXYScaleMatchFrameRim,
             // Other fn-refs:
-            validString, filterValidNotes, fxSpawnPop, drawScoreFx,
-            _resetStringDependentCaches,
+            validString, filterValidNotes,
             // ── Pool getters (all 33) ────────────────────────────────────────
             getPNote:          () => pNote,
             getPNoteEdge:      () => pNoteEdge,
@@ -6944,10 +6932,6 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
             getTgtX:             () => tgtX,
             getTgtDist:          () => tgtDist,
             getCurX:             () => curX,
-            getCurDist:          () => curDist,
-            getCurLookY:         () => curLookY,
-            getTgtLookY:         () => tgtLookY,
-            getFretRowFitBoost:  () => fretRowFitBoost,
             getPrevLowFretBonus: () => prevLowFretBonus,
             getPrevLockActive:   () => prevLockActive,
             // ── Lookahead / clock state getters ─────────────────────────────
@@ -6970,8 +6954,6 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
             getNdVerdictSawAlpha:    () => _ndVerdictSawAlpha,
             getNdVerdictMaxAlpha:    () => _ndVerdictMaxAlpha,
             getNdFrameNowMs:         () => _ndFrameNowMs,
-            getNdHitMarks:           () => _ndHitMarks,
-            getNdMissMarks:          () => _ndMissMarks,
             // ── Per-frame state getters ──────────────────────────────────────
             getInlayLabels:          () => _inlayLabels,
             getLeanSusPollCounter:   () => _leanSusPollCounter,
@@ -6980,11 +6962,6 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
             getTextSizeMulApplied:   () => _textSizeMulApplied,
             getImPMTechCount:        () => _imPMTechCount,
             getImFHTechCount:        () => _imFHTechCount,
-            getImPMXFillCount:       () => _imPMXFillCount,
-            getImPMXLinesCount:      () => _imPMXLinesCount,
-            getImFHXFillCount:       () => _imFHXFillCount,
-            getImFHXLinesCount:      () => _imFHXLinesCount,
-            getMeasureStarts:        () => _measureStarts,
             getMeasureStartsRef:     () => _measureStartsRef,
             // ── Stable object refs ───────────────────────────────────────────
             _frameLabeledKeys, _ndLabels, _scrGhostUpcomingCount,

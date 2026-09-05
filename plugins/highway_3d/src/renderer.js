@@ -14,7 +14,7 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 export function createRenderer({
     // ── Plain consts (shorthand) ──────────────────────────────────────────
-    K, NFRETS, NW, NH, AHEAD, BEHIND, S_GAP, S_COL,
+    K, NFRETS, NW, NH, AHEAD, BEHIND, S_GAP,
     CAM_FOCUS_BLEND_RATE,
     CAM_LOCK_ZOOM_MIN, CAM_LOCK_ZOOM_MAX, CAM_LOCK_CENTER_FRET,
     LOOKAHEAD_LOCK_ENGAGE_MAXF, LOOKAHEAD_LOCK_RELEASE_MAXF,
@@ -22,36 +22,14 @@ export function createRenderer({
     FRET_WIDTH_MID, CAM_TGT_BEHIND, CAM_DIST_BASE,
     VENUE_GEM_EMISSIVE_MUL, NOTEDETECT_GEM_VERDICT_WINDOW,
     INLAY_LABEL_FRETS,
-    GHOST_HOLD_AFTER_ONSET, camAhead, camTau,
-    BEAT_HEAD_SEC, SEC_HEAD_SEC,
-    LANE_BEAT_W, LANE_BEAT_DIV_W, LANE_LANE_W, LANE_OPEN_W, LANE_OPEN_H,
-    CHORD_BOX_LEAD_S, CHORD_BOX_TRAIL_S, CHORD_BOX_FADE_S,
-    CHORD_BOX_FRET_LABEL_THRESH_W,
+    GHOST_HOLD_AFTER_ONSET,
     CHORD_FRAME_RIM_MIN, CHORD_FRAME_RIM_FRAC_H,
-    SLIDE_RIBBON_SAMPLES,
-    HALO_BAR_HALF_H, HALO_BAR_HALF_W,
-    PM_X_BOX_TRAIL_S, PM_X_BOX_LEAD_S,
-    FH_X_BOX_TRAIL_S, FH_X_BOX_LEAD_S,
-    MUTE_X_LINES_TRAIL_S, MUTE_X_LINES_LEAD_S,
-    FH_X_LINES_TRAIL_S, FH_X_LINES_LEAD_S,
-    TECH_PLANE_LEAD_S, TECH_PLANE_TRAIL_S,
-    CONNECTOR_LINE_LEAD_S, CONNECTOR_LINE_TRAIL_S,
-    DROP_LINE_TRAIL_S, DROP_LINE_LEAD_S,
-    SUS_RAIL_LEAD_S, SUS_RAIL_TRAIL_S,
-    FRET_COL_MARKER_LEAD_S, FRET_COL_MARKER_TRAIL_S,
-    TEACH_MARK_LBL_TRAIL_S, TEACH_MARK_LBL_LEAD_S,
-    NOTE_FRET_LABEL_LEAD_S, NOTE_FRET_LABEL_TRAIL_S,
-    GHOST_FRET_LBL_TRAIL_S, GHOST_FRET_LBL_LEAD_S,
-    ARP_BRACKET_LEAD_S, ARP_BRACKET_TRAIL_S,
-    HALO_BAR_LEAD_S, HALO_BAR_TRAIL_S,
-    SEC_LABEL_LEAD_S, SEC_LABEL_TRAIL_S,
-    BARLINE_LEAD_S, BARLINE_TRAIL_S,
+    // camAhead, camTau: re-declared as let vars inside update() — not DI
     // ── Stable fn-refs (shorthand) ────────────────────────────────────────
     sY, xFret, xFretMid, fretLabelScaleForFret, pbBeg, pbEnd, pbReportTick,
-    hwyFirstRelevantFrettedTime, _syncOpenStringPitchLabels, txtMat,
-    fireDrawHooks,
+    hwyFirstRelevantFrettedTime, _syncOpenStringPitchLabels, txtMat, _setLabelMap,
     // createNoteRenderer outputs (fn-refs from screen.js wiring):
-    drawNote, drawArpBrackets, drawNotedetectLabels, chordHarmonyLabels,
+    drawNote, drawArpBrackets, chordHarmonyLabels,
     // createCamera outputs:
     camUpdate,
     // arp.js outputs (from createArp destructure in screen.js):
@@ -66,8 +44,6 @@ export function createRenderer({
     arpeggioLaneDividerFrameAccentMul, arpeggioLaneDividerXYScaleMatchFrameRim,
     // other screen.js fn-refs:
     validString, filterValidNotes,
-    fxSpawnPop, drawScoreFx,
-    _resetStringDependentCaches,
     // ── Getters (live state reads) ─────────────────────────────────────────
     // New pools:
     // All 33 pools (note-renderer 15 + new 18):
@@ -84,8 +60,7 @@ export function createRenderer({
     getTextSize, getCameraMode, getCameraSmoothing, getZoomSmoothing,
     getCameraLockLow, getCameraLockZoom, getNStr, getLeftyCached, getInverted,
     // Camera state:
-    getTgtX, getTgtDist, getCurX, getCurDist,
-    getCurLookY, getTgtLookY, getFretRowFitBoost,
+    getTgtX, getTgtDist, getCurX,
     getPrevLowFretBonus, getPrevLockActive,
     // Lookahead / clock state:
     getLookaheadCamX, getLookaheadFretSpan,
@@ -95,13 +70,11 @@ export function createRenderer({
     getCamSnapped, getCamPreScanned, getCamBootstrapHolding, getCamBootstrapMode, getSongKey,
     // ND / per-frame state:
     getNdVerdictSawAlpha, getNdVerdictMaxAlpha, getNdFrameNowMs,
-    getNdHitMarks, getNdMissMarks,
     // Other frame state:
     getInlayLabels,
     getLeanSusPollCounter, getLeanSus, getTextSizeMul, getTextSizeMulApplied,
     getImPMTechCount, getImFHTechCount,
-    getImPMXFillCount, getImPMXLinesCount, getImFHXFillCount, getImFHXLinesCount,
-    getMeasureStarts, getMeasureStartsRef,
+    getMeasureStartsRef,
     // Stable object refs (mutable arrays/maps, passed by reference):
     _frameLabeledKeys,
     _ndLabels,
@@ -344,24 +317,9 @@ function smoothNow(bundle) {
 //                           draw() after each init.
 // txtMat() rasterises into the unbounded cache these draws hit
 // anyway; ren.initTexture() forces the GPU upload now.
-// Swap a pooled label sprite's cached texture WITHOUT recompiling.
-// Setting material.needsUpdate bumps material.version, which forces
-// Three.js through getParameters/getProgramCacheKey on the next
-// render. Swapping one non-null texture for another does NOT change
-// the compiled program (the USE_MAP define is unchanged); only a
-// null <-> non-null transition does, and pooled label sprites are
-// constructed with a non-null map, so in practice this never
-// recompiles. (Note: the DOMINANT getParameters churn turned out to
-// be Three's transparent-DoubleSide two-pass path — see the
-// forceSinglePass comment in _spriteMat2MeshMat — this helper
-// removes the label-swap contribution on top of that.)
-function _setLabelMap(sprite, srcMat) {
-    const m = sprite.material;
-    if (m.map === srcMat.map) return;
-    const nullnessChanged = (m.map == null) !== (srcMat.map == null);
-    m.map = srcMat.map;
-    if (nullnessChanged) m.needsUpdate = true;
-}
+// _setLabelMap is defined in screen.js and passed as DI (F2: used by both
+// createNoteRenderer and createRenderer — must live in screen.js scope before
+// either factory is wired).
 
 let _chartPrewarmed = false;
 function _prewarmTex(mat) {

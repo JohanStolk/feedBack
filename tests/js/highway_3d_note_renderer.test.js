@@ -37,7 +37,7 @@ test('screen.js imports createNoteRenderer from note-renderer.js', () => {
         'screen.js must import createNoteRenderer');
 });
 
-test('screen.js wiring block contains all 130 DI params', () => {
+test('screen.js wiring block contains all 128 DI params', () => {
     // Locate the wiring call; count getter arrows, setter arrows, and
     // shorthand entries. Each property in the object literal is one entry.
     // Strategy: extract the createNoteRenderer({...}) call text and count.
@@ -62,11 +62,13 @@ test('screen.js wiring block contains all 130 DI params', () => {
     }, 0);
 
     const total = getterCount + setterCount + shorthandCount;
-    // 130 = 27 constants + 24 fn-refs + 7 stable-refs (shorthands:58) + 69 getters + 3 setters
-    // (7 dead fn-refs removed in Toby r1 fix: xFret, pbBeg, pbEnd,
-    //  arpeggioChordIdForNoteWithInferCache, arpHsBoundsForNote, chordWireHighDensity, muteXMat)
-    assert.strictEqual(total, 130,
-        `DI param count must be exactly 130 (got getters:${getterCount} setters:${setterCount} shorthands:${shorthandCount} = ${total})`);
+    // 128 = 56 shorthands + 69 getters + 3 setters
+    // 130 → 128: removed PROJ_WIN + PROJ_WIN_G (scope-check phantoms — never
+    //   declared in screen.js; note-renderer.js body uses hardcoded 0.6 /
+    //   _PROJ_WIN_ARP, not these DI params; only appeared in comments).
+    //   Caught by r2 scope-check test in highway_3d_renderer.test.js.
+    assert.strictEqual(total, 128,
+        `DI param count must be exactly 128 (got getters:${getterCount} setters:${setterCount} shorthands:${shorthandCount} = ${total})`);
 });
 
 // ── 2. Factory returns all 4 exports ────────────────────────────────────────
