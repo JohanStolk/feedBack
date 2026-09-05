@@ -28,7 +28,8 @@ function loadFn(file, name) {
 // R3c: the PURE geometry/label primitives were carved out of highway.js into
 // static/js/highway-geometry.js. Same bodies, byte-for-byte — only the file moved.
 const bnvNormalizedPoints = loadFn('static/js/highway-geometry.js', 'bnvNormalizedPoints');
-const bnvSampleAt = loadFn('plugins/highway_3d/screen.js', 'bnvSampleAt');
+// h3d-carve-14: bnvSampleAt moved to note-renderer.js (private helper inside createNoteRenderer)
+const bnvSampleAt = loadFn('plugins/highway_3d/src/note-renderer.js', 'bnvSampleAt');
 
 // ── bnvNormalizedPoints (2D) ─────────────────────────────────────────────────
 

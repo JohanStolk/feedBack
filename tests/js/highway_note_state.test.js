@@ -17,6 +17,10 @@ const highwayJs = path.join(__dirname, '..', '..', 'static', 'highway.js');
 // cannot import per-instance state without two panels sharing it.
 const primitivesJs = path.join(__dirname, '..', '..', 'static', 'js', 'highway-state-primitives.js');
 const highway3dJs = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
+// h3d-carve-14: V-section (drawNote) moved to note-renderer.js; tests that
+// pin its patterns must now also search note-renderer.js.
+const _h3dNoteRendererJs = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'note-renderer.js');
+const _h3dNoteRendererSrc = fs.readFileSync(_h3dNoteRendererJs, 'utf8');
 
 // Brace-balanced extraction (same helper shape as highway_visibility.test.js).
 function extractBlock(src, signature) {
@@ -138,7 +142,9 @@ test('default 2D renderer threads note state into drawNote / drawSustains / chor
 });
 
 test('3D highway captures bundle.getNoteState and overrides legacy hit/miss with the provider verdict', () => {
-    const src = fs.readFileSync(highway3dJs, 'utf8');
+    // h3d-carve-14: _ndGetNoteState captured in update() (screen.js); _showHit
+    // and its drawNote body are now in note-renderer.js — search both.
+    const src = fs.readFileSync(highway3dJs, 'utf8') + '\n' + _h3dNoteRendererSrc;
     assert.match(src, /_ndGetNoteState\s*=\s*\(bundle\s*&&\s*typeof\s+bundle\.getNoteState\s*===\s*['"]function['"]\)\s*\?\s*bundle\.getNoteState\s*:\s*null/, 'update() must capture bundle.getNoteState into _ndGetNoteState');
     // Provider verdict wins: miss => not _showHit; otherwise provider state
     // or the legacy fallback (`hit`) plus the pre-hit ghost window preview.
@@ -146,7 +152,7 @@ test('3D highway captures bundle.getNoteState and overrides legacy hit/miss with
 });
 
 test('3D highway captures _ndHasProvider via bundle.getNoteStateProvider (feedBack#254)', () => {
-    const src = fs.readFileSync(highway3dJs, 'utf8');
+    const src = fs.readFileSync(highway3dJs, 'utf8') + '\n' + _h3dNoteRendererSrc;
     // Detect-mode behavior — verdict-window cull extension, chord-frame
     // hold floor, and the smart drawNote cull — must be gated on a real
     // provider being registered, not on the always-present bundle.

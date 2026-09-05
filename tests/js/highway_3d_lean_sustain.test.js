@@ -19,6 +19,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
+// h3d-carve-14: sustain trail code moved to note-renderer.js; trail tests
+// must now search both files.
+const NOTE_RENDERER_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'note-renderer.js');
+const _noteRendererSrc = fs.readFileSync(NOTE_RENDERER_JS, 'utf8');
 
 test('lean sustain rendering is the default (_leanSus starts true)', () => {
     const src = fs.readFileSync(SCREEN_JS, 'utf8');
@@ -57,7 +61,8 @@ test('exactly one element is gated behind the lean flag, and it is the rail bloo
 });
 
 test('the trail + ribbon outline always draw and use the hit/miss-aware material', () => {
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    // h3d-carve-14: sustain trail body now in note-renderer.js
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + _noteRendererSrc;
     // Outline material is hit/miss aware: miss -> mMissOutline, confirmed hit
     // -> bright, otherwise the default mSusOutline white border.
     assert.match(

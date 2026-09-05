@@ -28,7 +28,8 @@ function loadFn(file, name) {
 // R3c: the PURE geometry/label primitives were carved out of highway.js into
 // static/js/highway-geometry.js. Same bodies, byte-for-byte — only the file moved.
 const labels2D = loadFn('static/js/highway-geometry.js', 'chordHarmonyLabels');
-const labels3D = loadFn('plugins/highway_3d/screen.js', 'chordHarmonyLabels');
+// h3d-carve-14: chordHarmonyLabels moved to note-renderer.js
+const labels3D = loadFn('plugins/highway_3d/src/note-renderer.js', 'chordHarmonyLabels');
 
 for (const [name, fn] of [['2D', labels2D], ['3D', labels3D]]) {
     test(`chordHarmonyLabels (${name}) surfaces rn + voicing + caged + guideTones`, () => {

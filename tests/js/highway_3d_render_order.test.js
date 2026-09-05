@@ -44,15 +44,21 @@ const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'scr
 // Since h3d-carve-1b, RENDER_ORDER_* constants and renderOrderForLayerAtZ
 // live in geometry.js; screen.js imports them.
 const GEOMETRY_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'geometry.js');
+// h3d-carve-14: V-section moved to note-renderer.js; renderOrder tests must
+// search both files.
+const NOTE_RENDERER_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'note-renderer.js');
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 let _src;
-/** Returns the cached 3D highway screen source under test. */
+/** Returns screen.js + note-renderer.js concatenated for pattern matching. */
 function src() {
-    if (!_src) _src = fs.readFileSync(SCREEN_JS, 'utf8');
+    if (!_src) {
+        _src = fs.readFileSync(SCREEN_JS, 'utf8')
+             + '\n' + fs.readFileSync(NOTE_RENDERER_JS, 'utf8');
+    }
     return _src;
 }
 

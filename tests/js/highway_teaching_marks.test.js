@@ -30,8 +30,9 @@ function loadFn(file, name) {
 // static/js/highway-geometry.js. Same bodies, byte-for-byte — only the file moved.
 const fingerLabel2D = loadFn('static/js/highway-geometry.js', 'teachingFingerLabel');
 const degreeLabel2D = loadFn('static/js/highway-geometry.js', 'teachingDegreeLabel');
-const fingerLabel3D = loadFn('plugins/highway_3d/screen.js', 'teachingFingerLabel');
-const degreeLabel3D = loadFn('plugins/highway_3d/screen.js', 'teachingDegreeLabel');
+// h3d-carve-14: teachingFingerLabel/Degree moved to note-renderer.js
+const fingerLabel3D = loadFn('plugins/highway_3d/src/note-renderer.js', 'teachingFingerLabel');
+const degreeLabel3D = loadFn('plugins/highway_3d/src/note-renderer.js', 'teachingDegreeLabel');
 const strumGroupBuckets = loadFn('static/js/highway-draw.js', 'strumGroupBuckets');
 
 // ── teachingFingerLabel (fg) ─────────────────────────────────────────────────
