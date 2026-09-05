@@ -288,3 +288,80 @@ test('no private bg-control.js symbol appears bare in screen.js IIFE body', () =
         'screen.js contains bare references to private bg-control.js symbols: ' +
         stale.join(', '));
 });
+
+// ── 15. Literal-table pin: _PC_C colors, _PC_PILL CSS, _PC_LABELS, _PC_USES ──
+
+test('bg-control.js literal tables match known-good values', () => {
+    // Mutation: any single literal change in _PC_C, _PC_PILL, _PC_LABELS, or
+    // _PC_USES (e.g. idle '#181830' → '#181831', or intensity: true → false for
+    // a style that should react to audio) → assertion fails → RED.
+    // These are inline-styled player-chrome pills whose correctness is invisible
+    // to runtime tests; without a pin a visual regression ships silently.
+    const s = src();
+
+    // ── _PC_C: inline color tokens from tailwind.config.js ────────────────────
+    const PC_C = {
+        idle:    '#181830',           // bg-dark-600
+        hover:   '#1e1e3a',           // bg-dark-500
+        text:    '#d1d5db',           // text-gray-300
+        textDim: '#6b7280',           // text-gray-500
+        onBg:    'rgba(20,83,45,0.5)',// bg-green-900/50
+        onText:  '#86efac',           // text-green-300
+    };
+    for (const [key, val] of Object.entries(PC_C)) {
+        assert.ok(s.includes(`${key}: '${val}'`),
+            `_PC_C.${key} must equal '${val}'`);
+    }
+
+    // ── _PC_PILL: pill-button CSS ──────────────────────────────────────────────
+    for (const frag of [
+        'padding:.375rem .75rem',
+        'border-radius:.5rem',
+        'font-size:.75rem',
+        'cursor:pointer',
+    ]) {
+        assert.ok(s.includes(frag), `_PC_PILL must contain "${frag}"`);
+    }
+
+    // ── _PC_LABELS: display names for each background style ───────────────────
+    const LABELS = {
+        off:         'Off',
+        particles:   'Particles (drifting)',
+        silhouettes: 'Silhouettes (parallax)',
+        lights:      'Lights (stage glows)',
+        geometric:   'Geometric (rotating shapes)',
+        butterchurn: 'Butterchurn (visualizer)',
+        image:       'Custom image',
+        video:       'Custom video',
+    };
+    for (const [key, label] of Object.entries(LABELS)) {
+        assert.ok(s.includes(`${key}: '${label}'`) || s.includes(`${key}: "${label}"`),
+            `_PC_LABELS.${key} must equal '${label}'`);
+    }
+
+    // ── _PC_USES: which controls each style enables ────────────────────────────
+    // [style, intensity, reactive]
+    const USES = [
+        ['off',         false, false],
+        ['particles',   true,  true],
+        ['silhouettes', true,  true],
+        ['lights',      true,  true],
+        ['geometric',   true,  true],
+        ['image',       true,  false],
+        ['video',       false, false],
+        ['butterchurn', false, false],
+        ['venue',       false, false],
+    ];
+    const usesBlock = s.match(/const _PC_USES\s*=\s*\{([\s\S]*?)\n\s*\};/);
+    assert.ok(usesBlock, '_PC_USES table must be present in bg-control.js');
+    const usesBody = usesBlock[1];
+    for (const [style, intensity, reactive] of USES) {
+        const entry = usesBody.match(new RegExp(style + '\\s*:\\s*\\{([^}]+)\\}'));
+        assert.ok(entry, `_PC_USES must contain '${style}' entry`);
+        const block = entry[1];
+        assert.match(block, new RegExp('intensity:\\s*' + intensity),
+            `_PC_USES.${style}.intensity must be ${intensity}`);
+        assert.match(block, new RegExp('reactive:\\s*' + reactive),
+            `_PC_USES.${style}.reactive must be ${reactive}`);
+    }
+});
