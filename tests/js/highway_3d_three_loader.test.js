@@ -38,11 +38,15 @@ test('T is exported as a live let-binding from three-loader.js', () => {
 });
 
 test('loadThree assigns T = mod in both the primary and CDN .then handlers', () => {
-    // Mutation: remove all T = mod assignments — T stays null forever; all Three.js
-    // calls throw.  Two assignments exist: primary load and CDN fallback.
+    // Mutation 1: remove all T = mod — T stays null forever; T.WebGLRenderer throws.
+    // Two assignments exist: primary .then and CDN fallback .then.
+    // Mutation 2 (Toby r1): `const T = mod` inside .then bodies — count=2 still
+    // matches, but shadows the module-level export; live-binding T stays null forever.
     const matches = loader().match(/T\s*=\s*mod\s*;/g) || [];
     assert.ok(matches.length >= 2,
         'T = mod must appear in both the primary and CDN .then handlers (found ' + matches.length + ')');
+    assert.doesNotMatch(loader(), /(?:const|let|var)\s+T\s*=\s*mod/,
+        'T = mod must be a bare assignment, not a declaration that shadows the live-binding export');
 });
 
 test('loadThree memoises the promise — returns existing promise on repeated calls', () => {
