@@ -13,23 +13,26 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
+const RENDERER_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'renderer.js');
 
 test('sustain rails are gated on multi-note chords with a known box width within AHEAD', () => {
     // Each chord in a sequence (including repeats) draws a rail from its onset
     // to the next chord's onset, chaining together to cover the full handshape
     // duration visually. Single notes have no chord frame to anchor a rail to.
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    // h3d-carve-15: sustain-rail block moved to renderer.js
+    const rendererSrc = fs.readFileSync(RENDERER_JS, 'utf8');
     assert.match(
-        src,
+        rendererSrc,
         /if\s*\(\s*chShape\.size\s*>\s*1\s*&&\s*chordOpenBoxW\s*!=\s*null\s*&&\s*chDt\s*<\s*AHEAD\s*\)/,
         'sustain-rail block must stay gated on chShape.size > 1, chordOpenBoxW and chDt < AHEAD',
     );
 });
 
 test('sustain rails pick arpeggio color for arpeggio frames, teal otherwise', () => {
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    // h3d-carve-15: rail color expression moved to renderer.js
+    const rendererSrc = fs.readFileSync(RENDERER_JS, 'utf8');
     assert.match(
-        src,
+        rendererSrc,
         /chordHighwayLavenderArpVisual\s*\?\s*ARPEGGIO_RIM_BLUE_HEX\s*:\s*CHORD_BOX_TEAL_HEX/,
         'rail color must select ARPEGGIO_RIM_BLUE_HEX for arpeggio frames and CHORD_BOX_TEAL_HEX for chords',
     );

@@ -17,10 +17,11 @@ const path = require('node:path');
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
 // h3d-carve-14: V-section moved to note-renderer.js
 const NOTE_RENDERER_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'note-renderer.js');
+const RENDERER_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'renderer.js');
 const _noteSrc = fs.readFileSync(NOTE_RENDERER_JS, 'utf8');
 
 test('a _slideTargetSet pre-pass builds the suppressed-gem set from bundle.notes', () => {
-    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + _noteSrc;
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + _noteSrc + '\n' + fs.readFileSync(RENDERER_JS, 'utf8');
     assert.match(
         src,
         /const\s+checkSrc\s*=\s*\([^)]*\)\s*=>\s*\{[\s\S]*?stSet\.add\(/,
@@ -34,7 +35,7 @@ test('a _slideTargetSet pre-pass builds the suppressed-gem set from bundle.notes
 });
 
 test('_isSlideTgt is derived from _slideTargetSet membership', () => {
-    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + _noteSrc;
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + _noteSrc + '\n' + fs.readFileSync(RENDERER_JS, 'utf8');
     assert.match(
         src,
         /_isSlideTgt\s*=\s*!!\(\s*_slideTargetSet\s*&&\s*_slideTargetSet\.has\(/,
@@ -45,7 +46,7 @@ test('_isSlideTgt is derived from _slideTargetSet membership', () => {
 test('_isSlideTgt is threaded into drawNote as the skipBody argument', () => {
     // drawNote(n, now, openX, skipLabel, skipBody, ...) — _isSlideTgt sits in
     // the 5th (skipBody) position so the gem body is suppressed.
-    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + _noteSrc;
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + _noteSrc + '\n' + fs.readFileSync(RENDERER_JS, 'utf8');
     assert.match(
         src,
         /drawNote\(\s*n\s*,\s*now\s*,\s*singleOpenX\s*,\s*skipLabel\s*,\s*_isSlideTgt\s*,/,
@@ -56,7 +57,7 @@ test('_isSlideTgt is threaded into drawNote as the skipBody argument', () => {
 test('the sustain trail renders for all notes, including skipBody slide targets', () => {
     // The trail block must stay outside the !skipBody gem gate so suppressed
     // slide-target gems still show their slide trail.
-    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + _noteSrc;
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + _noteSrc + '\n' + fs.readFileSync(RENDERER_JS, 'utf8');
     assert.match(
         src,
         /Rendered for ALL notes with sustain, including skipBody=true/,

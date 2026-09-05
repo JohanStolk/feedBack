@@ -47,6 +47,7 @@ const GEOMETRY_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 's
 // h3d-carve-14: V-section moved to note-renderer.js; renderOrder tests must
 // search both files.
 const NOTE_RENDERER_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'note-renderer.js');
+const RENDERER_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'renderer.js');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -57,7 +58,8 @@ let _src;
 function src() {
     if (!_src) {
         _src = fs.readFileSync(SCREEN_JS, 'utf8')
-             + '\n' + fs.readFileSync(NOTE_RENDERER_JS, 'utf8');
+             + '\n' + fs.readFileSync(NOTE_RENDERER_JS, 'utf8')
+             + '\n' + fs.readFileSync(RENDERER_JS, 'utf8');
     }
     return _src;
 }

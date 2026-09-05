@@ -23,7 +23,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
-const src = fs.readFileSync(SCREEN_JS, 'utf8');
+const RENDERER_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'renderer.js');
+// h3d-carve-15: U-section moved to renderer.js; scan both.
+const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(RENDERER_JS, 'utf8');
 // h3d-carve-9: camUpdate body moved here; tests that pin its internals retarget to cameraSrc.
 const CAMERA_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'camera.js');
 const cameraSrc = fs.readFileSync(CAMERA_JS, 'utf8');
@@ -90,9 +92,10 @@ test('lookahead window is expressed in measures with a seconds fallback', () => 
 
 test('measure-start cache only keeps beats with measure >= 0', () => {
     // Intra-measure beats carry measure === -1 and must be skipped.
+    // h3d-carve-15: bare _measureStarts = _ms → setMeasureStarts(_ms) in renderer.js
     assert.match(
         src,
-        /Number\.isFinite\(\s*_b\.measure\s*\)\s*&&\s*_b\.measure\s*>=\s*0[\s\S]*?_measureStarts\s*=\s*_ms/,
+        /Number\.isFinite\(\s*_b\.measure\s*\)\s*&&\s*_b\.measure\s*>=\s*0[\s\S]*?setMeasureStarts\s*\(\s*_ms\s*\)/,
         'only measure-start beats (measure >= 0) feed _measureStarts',
     );
 });
@@ -130,9 +133,10 @@ test('measure-start cache is invalidated on song change', () => {
     // The song-change reset (reconnect path) resets _camSnapped; it must also
     // drop the measure-start cache, otherwise lookaheadEndTime sizes the window
     // off the previous song's measure grid and over-zooms the first-data snap.
+    // h3d-carve-15: bare assignments → setter calls in renderer.js
     assert.match(
         src,
-        /_camSnapped\s*=\s*false\s*;[\s\S]*?_measureStarts\s*=\s*\[\]\s*;\s*_measureStartsRef\s*=\s*null\s*;/,
+        /setCamSnapped\s*\(\s*false\s*\)\s*;[\s\S]*?setMeasureStarts\s*\(\s*\[\]\s*\)\s*;\s*setMeasureStartsRef\s*\(\s*null\s*\)\s*;/,
         'song-change reset must clear _measureStarts / _measureStartsRef alongside _camSnapped',
     );
 });

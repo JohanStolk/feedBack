@@ -17,10 +17,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
+const RENDERER_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'renderer.js');
 
 let _src;
 function src() {
-    if (!_src) _src = fs.readFileSync(SCREEN_JS, 'utf8');
+    if (!_src) _src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(RENDERER_JS, 'utf8');
     return _src;
 }
 

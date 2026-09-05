@@ -20,6 +20,7 @@ const path = require('node:path');
 
 const highwayJs = path.join(__dirname, '..', '..', 'static', 'highway.js');
 const highway3dJs = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
+const RENDERER_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'renderer.js');
 
 // Brace-balanced extraction (same helper shape as highway_note_state.test.js).
 function extractBlock(src, signature) {
@@ -60,7 +61,7 @@ test('core _makeBundle exposes isPlaying derived from the chart-clock anchor', (
 });
 
 test('smoothNow returns raw and re-anchors when the host reports not playing', () => {
-    const src = fs.readFileSync(highway3dJs, 'utf8');
+    const src = fs.readFileSync(highway3dJs, 'utf8') + '\n' + fs.readFileSync(RENDERER_JS, 'utf8');
     const fn = extractBlock(src, 'function smoothNow(bundle)');
     // Strict === false so downlevel hosts (isPlaying undefined) fall through
     // to the existing staleness-based interpolation cap.
@@ -69,14 +70,16 @@ test('smoothNow returns raw and re-anchors when the host reports not playing', (
 
     // The pause branch re-anchors the clock state and returns the raw sample
     // (no forward extrapolation).
+    // h3d-carve-15: bare assignments → DI setter calls in renderer.js
     const branch = fn.slice(guardIdx);
-    assert.match(branch, /_clkAudioT\s*=\s*raw/, 'pause branch must re-anchor _clkAudioT to raw');
-    assert.match(branch, /_clkPerf\s*=\s*p/, 'pause branch must re-anchor _clkPerf to now');
-    assert.match(branch, /return\s*\(\s*_frameNow\s*=\s*raw\s*\)/, 'pause branch must return raw');
+    assert.match(branch, /setClkAudioT\s*\(\s*raw\s*\)/, 'pause branch must re-anchor _clkAudioT to raw');
+    assert.match(branch, /setClkPerf\s*\(\s*p\s*\)/, 'pause branch must re-anchor _clkPerf to now');
+    assert.match(branch, /setFrameNow\s*\([^)]+\)/, 'pause branch must call setFrameNow (return raw)');
 
     // The pause gate must come before the new-sample re-anchor / interpolation
     // path so a frozen clock never extrapolates forward.
-    const newSampleIdx = fn.search(/if\s*\(\s*raw\s*!==\s*_clkAudioT\s*\)/);
+    // h3d-carve-15: _clkAudioT accessed via getClkAudioT() getter in renderer.js
+    const newSampleIdx = fn.search(/if\s*\(\s*raw\s*!==\s*(?:_clkAudioT|getClkAudioT\s*\(\s*\))\s*\)/);
     assert.ok(newSampleIdx !== -1, 'smoothNow new-sample branch not found');
     assert.ok(guardIdx < newSampleIdx, 'isPlaying pause gate must precede the interpolation path');
 });

@@ -12,7 +12,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
-const src = fs.readFileSync(SCREEN_JS, 'utf8');
+const RENDERER_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'renderer.js');
+// h3d-carve-15: U-section (bootstrap region C) moved to renderer.js; scan both.
+const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(RENDERER_JS, 'utf8');
 // Since h3d-carve-1b, hwyFirstRelevantFrettedTime lives in geometry.js.
 const GEOMETRY_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'geometry.js');
 const geoSrc = fs.readFileSync(GEOMETRY_JS, 'utf8');
@@ -117,11 +119,11 @@ test('recent onsets inside the behind-window bootstrap at now', () => {
 test('bootstrap runs once when complete chart arrays arrive', () => {
     const bootstrap = sourceBetween(
         '// ── Camera bootstrap (first chart data)',
-        '            pbBeg(4);',
+        '    pbBeg(4);',
     );
     assert.match(
         bootstrap,
-        /if\s*\(\s*!_camSnapped\s*&&\s*!_camPreScanned\s*&&\s*notes\s*&&\s*chords\s*\)/,
+        /if\s*\(\s*!getCamSnapped\s*\(\s*\)\s*&&\s*!getCamPreScanned\s*\(\s*\)\s*&&\s*notes\s*&&\s*chords\s*\)/,
         'chart bootstrap must be gated to one pass after both arrays arrive',
     );
     assert.match(
@@ -131,7 +133,7 @@ test('bootstrap runs once when complete chart arrays arrive', () => {
     );
     assert.match(
         bootstrap,
-        /firstFrettedTime\s*===\s*null[\s\S]*?_camSnapped\s*=\s*true/,
+        /firstFrettedTime\s*===\s*null[\s\S]*?setCamSnapped\s*\(\s*true\s*\)/,
         'all-open/empty charts without lookahead bounds must permanently disable bootstrap work',
     );
 });
@@ -139,7 +141,7 @@ test('bootstrap runs once when complete chart arrays arrive', () => {
 test('steady and lookahead modes initialize immediately from future chart data', () => {
     const bootstrap = sourceBetween(
         '// ── Camera bootstrap (first chart data)',
-        '            pbBeg(4);',
+        '    pbBeg(4);',
     );
     assert.match(
         bootstrap,
@@ -163,7 +165,7 @@ test('steady and lookahead modes initialize immediately from future chart data',
     );
     assert.match(
         bootstrap,
-        /curX\s*=\s*tgtX\s*;[\s\S]*?curDist\s*=\s*tgtDist\s*;/,
+        /setCurX\s*\(\s*getTgtX\s*\(\)\s*\)\s*;[\s\S]*?setCurDist\s*\(\s*getTgtDist\s*\(\)\s*\)\s*;/,
         'the initial base position must be applied before the note draw loop',
     );
 });
@@ -180,31 +182,38 @@ test('silent-intro hold hands off only when live framing is ready', () => {
     );
     assert.match(
         target,
-        /if\s*\(\s*bootstrapHoldActive\s*\)[\s\S]*?lockActive\s*=\s*prevLockActive/,
+        /if\s*\(\s*bootstrapHoldActive\s*\)[\s\S]*?lockActive\s*=\s*getPrevLockActive\s*\(\s*\)/,
         'the bootstrap target must remain untouched while the live window is empty',
     );
     assert.match(
         target,
-        /_camBootstrapMode\s*!==\s*cameraMode[\s\S]*?_camBootstrapHolding\s*=\s*false/,
+        // h3d-carve-15: bare assignments → setter calls in renderer.js
+        /getCamBootstrapMode\(\)\s*!==\s*cameraMode[\s\S]*?setCamBootstrapHolding\s*\(\s*false\s*\)/,
         'a live camera-mode change must safely release the old-mode hold',
     );
 });
 
 test('song changes and teardown reset every bootstrap state field', () => {
-    const resetAssignments = src.match(
-        /_camSnapped\s*=\s*false\s*;\s*\r?\n\s*_camPreScanned\s*=\s*false\s*;\s*\r?\n\s*_camBootstrapHolding\s*=\s*false\s*;\s*\r?\n\s*_camBootstrapMode\s*=\s*null\s*;/g,
+    // h3d-carve-15: song-change path uses setter calls (renderer.js);
+    // teardown/init path uses bare assignments (screen.js). Both must exist.
+    const setterResets = src.match(
+        /setCamSnapped\s*\(\s*false\s*\)\s*;\s*\r?\n\s*setCamPreScanned\s*\(\s*false\s*\)/g,
     ) || [];
+    const bareResets = src.match(
+        /_camSnapped\s*=\s*false\s*;\s*\r?\n\s*_camPreScanned\s*=\s*false/g,
+    ) || [];
+    const totalResets = setterResets.length + bareResets.length;
     assert.equal(
-        resetAssignments.length,
+        totalResets,
         2,
-        'song-change and teardown paths must both reset bootstrap state',
+        `song-change and teardown paths must both reset bootstrap state (setter=${setterResets.length}, bare=${bareResets.length})`,
     );
 });
 
 test('Camera Director still layers after the bootstrapped auto-framing base', () => {
     const bootstrap = sourceBetween(
         '// ── Camera bootstrap (first chart data)',
-        '            pbBeg(4);',
+        '    pbBeg(4);',
     );
     assert.doesNotMatch(
         bootstrap,

@@ -13,6 +13,8 @@ const path = require('node:path');
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
 // h3d-carve-12: chordShapeCoveredByStandaloneNotes moved to src/arp.js
 const ARP_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'arp.js');
+// h3d-carve-15: deferChordGems / noteStreamCoversArpShape moved to src/renderer.js
+const RENDERER_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'renderer.js');
 
 test('chordShapeCoveredByStandaloneNotes helper exists with the expected signature', () => {
     const src = fs.readFileSync(ARP_JS, 'utf8');
@@ -27,7 +29,7 @@ test('deferChordGems gates both synth and explicit+covered branches on note-stre
     // Either branch firing without coverage produces the empty-lavender-frame
     // regression PR #262 fixed. Pin both predicates so a refactor that drops
     // one gate fails the test.
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(RENDERER_JS, 'utf8');
     assert.match(
         src,
         /const\s+deferChordGems\s*=\s*\(\s*ch\.h3dSynth\s*&&\s*noteStreamCoversArpShape\(\)\s*\)\s*\|\|\s*inferredArpPattern\s*\|\|\s*\(\s*hsHintFrame\.explicit\s*&&\s*hsHintFrame\.covered\s*&&\s*noteStreamCoversArpShape\(\)\s*\)/,
@@ -39,14 +41,14 @@ test('noteStreamCoversArpShape is computed lazily (called, not eagerly bound)', 
     // Eager allocation regressed perf on dense charts (Copilot review on PR
     // #262). The shape must be a callable so short-circuit evaluation skips
     // the note-stream scan when neither gating branch needs it.
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(RENDERER_JS, 'utf8');
     assert.match(
         src,
         /const\s+noteStreamCoversArpShape\s*=\s*(?:\(\s*\)\s*=>|function(?:\s+\w+)?\s*\(\s*\))/,
         'noteStreamCoversArpShape must be an arrow/function so the scan is lazy',
     );
     assert.doesNotMatch(
-        src,
+        fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(RENDERER_JS, 'utf8'),
         /const\s+noteStreamCoversArpShape\s*=\s*chordShapeCoveredByStandaloneNotes\(/,
         'noteStreamCoversArpShape must not eagerly invoke the coverage helper',
     );

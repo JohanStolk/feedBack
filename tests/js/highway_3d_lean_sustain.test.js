@@ -22,7 +22,9 @@ const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'scr
 // h3d-carve-14: sustain trail code moved to note-renderer.js; trail tests
 // must now search both files.
 const NOTE_RENDERER_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'note-renderer.js');
+const RENDERER_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'renderer.js');
 const _noteRendererSrc = fs.readFileSync(NOTE_RENDERER_JS, 'utf8');
+const _rendererSrc = fs.readFileSync(RENDERER_JS, 'utf8');
 
 test('lean sustain rendering is the default (_leanSus starts true)', () => {
     const src = fs.readFileSync(SCREEN_JS, 'utf8');
@@ -34,28 +36,30 @@ test('lean sustain rendering is the default (_leanSus starts true)', () => {
 });
 
 test('the full-quality look is an opt-out via localStorage h3d_full_sus', () => {
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    // h3d-carve-15: lean poll + setLeanSus call now in renderer.js update()
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(RENDERER_JS, 'utf8');
     assert.match(
         src,
-        /_leanSus\s*=\s*localStorage\.getItem\(\s*['"]h3d_full_sus['"]\s*\)\s*!==\s*['"]1['"]/,
+        /setLeanSus\s*\(\s*localStorage\.getItem\(\s*['"]h3d_full_sus['"]\s*\)\s*!==\s*['"]1['"]\s*\)/,
         "lean must stay on unless localStorage.h3d_full_sus === '1' opts back into the full look",
     );
 });
 
 test('exactly one element is gated behind the lean flag, and it is the rail bloom', () => {
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    // h3d-carve-15: lean gate moved to renderer.js; getter form getLeanSus()
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(RENDERER_JS, 'utf8');
     // Only the additive rail bloom may hide behind the lean flag. If a future
-    // edit re-gates the trail or ribbon outline behind !_leanSus, this count
+    // edit re-gates the trail or ribbon outline behind !getLeanSus(), this count
     // climbs above 1 and the test fails — that's the regression guard.
-    const gates = src.match(/if\s*\(\s*!_leanSus\s*\)/g) || [];
+    const gates = src.match(/if\s*\(\s*!getLeanSus\s*\(\s*\)\s*\)/g) || [];
     assert.equal(
         gates.length,
         1,
-        'expected exactly one `if (!_leanSus)` gate (the rail bloom); the outline must stay ungated',
+        'expected exactly one `if (!getLeanSus())` gate (the rail bloom); the outline must stay ungated',
     );
     assert.match(
         src,
-        /if\s*\(\s*!_leanSus\s*\)\s*\{[\s\S]{0,200}?pSusRailBloom\.get\(\)/,
+        /if\s*\(\s*!getLeanSus\s*\(\s*\)\s*\)\s*\{[\s\S]{0,200}?pSusRailBloom\.get\(\)/,
         'the single lean gate must be the one that wraps pSusRailBloom.get()',
     );
 });

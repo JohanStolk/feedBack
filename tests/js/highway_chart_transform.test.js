@@ -331,7 +331,12 @@ test('default 2D draw path prefers the staged views (drawNotes/drawChords/drawSu
 });
 
 test('highway_3d nut labels prefer the transform-aware bundle tuning/capo', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js'), 'utf8');
+    // h3d-carve-3: _openStringPitchLabelsForTuning (let tuning / let cap) moved to src/utils.js
+    const RENDERER_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'renderer.js');
+    const UTILS_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'utils.js');
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js'), 'utf8')
+              + '\n' + fs.readFileSync(RENDERER_JS, 'utf8')
+              + '\n' + fs.readFileSync(UTILS_JS, 'utf8');
     assert.match(src, /let tuning = Array\.isArray\(bundle\.tuning\) \? bundle\.tuning : \(songInfo && songInfo\.tuning\)/,
         'label derivation reads a well-formed bundle.tuning first, songInfo otherwise');
     assert.match(src, /let cap = bundle\.capo;/,
