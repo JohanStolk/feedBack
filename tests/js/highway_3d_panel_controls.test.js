@@ -75,6 +75,23 @@ function loadHighway3dStatics() {
         // h3d-carve-2: T and loadThree moved to src/three-loader.js.
         T: null,
         loadThree: () => Promise.resolve(),
+        // h3d-carve-3: color/tuning/splitscreen utils moved to src/utils.js.
+        _h3dHexToInt: () => null,
+        _clampByteI: n => n,
+        _darkenInt: (hex) => hex,
+        _lightenInt: (hex) => hex,
+        resolveStringCount: () => 6,
+        _NOTE_NAMES_SHARP: ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'],
+        _BASE_OPEN_MIDI_BASS4: Object.freeze([28, 33, 38, 43]),
+        _BASE_OPEN_MIDI_BASS5: Object.freeze([23, 28, 33, 38, 43]),
+        _BASE_OPEN_MIDI_GUITAR6: Object.freeze([40, 45, 50, 55, 59, 64]),
+        _BASE_OPEN_MIDI_GUITAR7: Object.freeze([35, 40, 45, 50, 55, 59, 64]),
+        _BASE_OPEN_MIDI_GUITAR8: Object.freeze([28, 35, 40, 45, 50, 55, 59, 64]),
+        _baseOpenStringMidis: () => [40, 45, 50, 55, 59, 64],
+        _midiToPitchLabel: () => 'A4',
+        _openStringPitchLabelsForTuning: () => [],
+        _ssActive: () => false,
+        _ssIsCanvasFocused: () => true,
     };
     vm.createContext(sandbox);
     vm.runInContext(instrumented, sandbox, { filename: SCREEN_JS });
