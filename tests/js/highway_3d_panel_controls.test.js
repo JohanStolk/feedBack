@@ -130,6 +130,11 @@ function loadHighway3dStatics() {
             _applyBloom() {},
             _bloomEnsure() { return null; },
         }),
+        // h3d-carve-9: W-section (camera lerp) moved to src/camera.js.
+        createCamera: () => ({
+            effectiveVfov() { return 70; },
+            camUpdate() {},
+        }),
     };
     vm.createContext(sandbox);
     vm.runInContext(instrumented, sandbox, { filename: SCREEN_JS });

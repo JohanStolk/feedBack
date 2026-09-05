@@ -14,6 +14,7 @@ import { createBgControl } from './src/bg-control.js'; // h3d-carve-5
 import { createMaterialBuilders } from './src/materials.js'; // h3d-carve-6
 import { createOverlay } from './src/overlay.js'; // h3d-carve-7
 import { createFx } from './src/fx.js'; // h3d-carve-8
+import { createCamera } from './src/camera.js'; // h3d-carve-9
 
 (function () {
     'use strict';
@@ -12670,205 +12671,38 @@ import { createFx } from './src/fx.js'; // h3d-carve-8
             ctx.restore();
         }
 
-        // Horizontal-FOV-hold ("Hor+"). Returns the vertical fov (deg) the
-        // camera should use for the given pane aspect. With the bridge off (or
-        // absent), or at/under the start aspect, it returns the base vertical
-        // fov unchanged — an exact no-op, so normal panes render identically to
-        // before. Past the start aspect it lowers the vertical fov to keep the
-        // horizontal cone ~constant, so the neck fills an ultra-wide pane
-        // instead of collapsing into a central sliver. Pure + finite-guarded.
-        function effectiveVfov(aspect, tune) {
-            const base = (tune && Number.isFinite(tune.baseVfov)) ? tune.baseVfov : BASE_VFOV;
-            if (!tune || !tune.enabled || !Number.isFinite(aspect) || aspect <= 0) return base;
-            const start = (Number.isFinite(tune.startAspect) && tune.startAspect > 0)
-                ? tune.startAspect : HORPLUS_START_ASPECT;
-            if (aspect <= start) return base;
-            const floor = Number.isFinite(tune.minVfovDeg) ? tune.minVfovDeg : HORPLUS_MIN_VFOV;
-            const DEG = Math.PI / 180;
-            // Held horizontal fov: explicit hfovDeg if given, else the horizontal
-            // cone the base vertical fov produces at the start aspect.
-            const hfov = (Number.isFinite(tune.hfovDeg) && tune.hfovDeg > 0)
-                ? tune.hfovDeg * DEG
-                : 2 * Math.atan(Math.tan(base * DEG / 2) * start);
-            // Vertical fov that reproduces that horizontal cone at this aspect.
-            let vfov = 2 * Math.atan(Math.tan(hfov / 2) / aspect) / DEG;
-            const blend = Number.isFinite(tune.blend) ? Math.max(0, Math.min(1, tune.blend)) : 1;
-            vfov = base + (vfov - base) * blend;            // 0 = base, 1 = full Hor+
-            if (!Number.isFinite(vfov)) return base;
-            return Math.max(floor, Math.min(base, vfov));
-        }
-
-        /* ── Camera smooth lerp ──────────────────────────────────────────── */
-        function camUpdate(bundle) {
-            const bpm = computeBPM(bundle.beats, bundle.currentTime);
-            const lerp = CAM_LERP_BASE * Math.max(bpm, 60) / 120;
-
-            // ── Horizontal-FOV-hold + optional wide-pane pose nudges ──
-            // Driven by window.__h3dAspectTune (default off → exact no-op).
-            // _resolveTuneFor(paneKey) returns the shared base with THIS pane's
-            // overrides (if any) laid on top, so a single split pane can be framed
-            // independently. The base is seeded from defaults + localStorage on
-            // first read, so a persisted tuning session applies on load without
-            // opening the panel. Every field is finite-coerced. When disabled (or
-            // splitOnly and not in a split) the tune is treated as null, so
-            // effectiveVfov returns the base vertical fov and cam.fov is restored
-            // to it. The fov write is guarded on an actual change so a steady pane
-            // costs nothing.
-            const _paneKey = _aspectPaneKey(
-                bundle && bundle.songInfo && bundle.songInfo.arrangement, _paneUid);
-            // Only feed the Target-picker registry while the tuner is open (same
-            // gate as the readout). Closed → nothing is registered, so the registry
-            // can't grow for users who never open the panel; the key is still
-            // resolved below so any saved overrides keep applying.
-            if (window.__h3dAspectPanelOpen) _aspectRegisterPane(_paneKey);
-            const _aspTune = _resolveTuneFor(_paneKey);
-            const _aspActive = !!(_aspTune && _aspTune.enabled
-                && !(_aspTune.splitOnly && !_ssActive()));
-            const _tune = _aspActive ? _aspTune : null;
-            const _vfov = effectiveVfov(_paneAspect, _tune);
-            if (Number.isFinite(_vfov) && Math.abs(_vfov - cam.fov) > 1e-4) {
-                cam.fov = _vfov;
-                cam.updateProjectionMatrix();
-            }
-            // Publish a per-pane live readout for the tuner panel (only while it's
-            // open, so the steady path stays allocation-free). Keyed by pane so
-            // the panel can show the reading for whichever target is selected.
-            if (window.__h3dAspectPanelOpen) {
-                const _ro = window.__h3dAspectReadout || (window.__h3dAspectReadout = {});
-                const _slot = _ro[_paneKey] || (_ro[_paneKey] = {});
-                _slot.aspect = _paneAspect; _slot.vfov = _vfov;
-                _ro.__last = _paneKey;
-            }
-            // Optional pose nudges (height / dolly / pitch) to chase a low-flat
-            // wide-pane look if fov alone isn't enough. Gated to wide panes and
-            // suppressed while the Camera Director owns the view (it wins).
-            const _startAspect = (_tune && Number.isFinite(_tune.startAspect) && _tune.startAspect > 0)
-                ? _tune.startAspect : HORPLUS_START_ASPECT;
-            // Resolve the Camera Director bridge once (per-panel under splitscreen,
-            // else global). Used both for the wide-pane gate and the transforms below.
-            const _freeCam = _freeCamFor(highwayCanvas);
-            const _dirActive = !!(_freeCam && _freeCam.enabled);
-            const _wide = !!(_tune && _paneAspect > _startAspect) && !_dirActive;
-            const _poseHMul = (_wide && Number.isFinite(_tune.heightMul)) ? _tune.heightMul : 1;
-            const _poseDMul = (_wide && Number.isFinite(_tune.distMul)) ? _tune.distMul : 1;
-            const _poseLookYAdd = (_wide && Number.isFinite(_tune.pitchAdd)) ? _tune.pitchAdd * K : 0;
-            const _poseLookZMul = (_wide && Number.isFinite(_tune.lookDepthMul) && _tune.lookDepthMul > 0)
-                ? _tune.lookDepthMul : 1;
-
-            curX += (tgtX - curX) * lerp;
-            // The fret-row fit guard (end of camUpdate) may dolly the camera back
-            // via _fretRowFitBoost; the span-driven tgtDist still owns zooming IN.
-            curDist += (tgtDist * _fretRowFitBoost - curDist) * lerp;
-            const dist = curDist * aspectScale;
-            const h = CAM_H_BASE * (dist / CAM_DIST_BASE);
-
-            // Zoom-interpolated framing multipliers: tight (NEAR) -> lower/closer;
-            // wide (FAR, fret 1<->20) -> higher/pulled back.
-            const _zt = Math.max(0, Math.min(1,
-                (dist - CAM_FRAME_DIST_NEAR) / (CAM_FRAME_DIST_FAR - CAM_FRAME_DIST_NEAR)));
-            const _hMul = CAM_FRAME_H_NEAR + (CAM_FRAME_H_FAR - CAM_FRAME_H_NEAR) * _zt;
-            const _dMul = CAM_FRAME_D_NEAR + (CAM_FRAME_D_FAR - CAM_FRAME_D_NEAR) * _zt;
-            const shoulderOffset = (_leftyCached ? -1 : 1) * 10 * K;
-            let _camX = curX + shoulderOffset, _camY = h * _hMul, _camZ = dist * _dMul;
-            // Optional wide-pane pose nudges (default identity → no-op).
-            if (_poseHMul !== 1) _camY *= _poseHMul;
-            if (_poseDMul !== 1) _camZ *= _poseDMul;
-            // ── Free-camera user tweaks (orbit / height / zoom / pan) ──
-            // Driven by the Camera Director plugin via the camera bridge:
-            // window.__h3dCamCtlPanels[panelIndexFor(canvas)] when split (this
-            // panel's own camera), falling back to the global window.__h3dCamCtl.
-            // Layered ON TOP of the auto-framing so note tracking still works.
-            // The bridge is read once into _freeCam and reused for both the
-            // position and the look-at transforms; every field is coerced to a
-            // finite number before use so a malformed object can never feed NaN
-            // into cam.position / cam.lookAt.
-            // _freeCam resolved above via _freeCamFor(highwayCanvas): the
-            // per-panel __h3dCamCtlPanels entry, else global __h3dCamCtl, else null.
-            const _lookAtZ = -FOCUS_D * 0.35 * _poseLookZMul;
-            if (_freeCam && _freeCam.enabled) {
-                const _distMul = Number.isFinite(_freeCam.distMul) ? _freeCam.distMul : 1;
-                const _heightMul = Number.isFinite(_freeCam.heightMul) ? _freeCam.heightMul : 1;
-                const _yaw = Number.isFinite(_freeCam.yaw) ? _freeCam.yaw : 0;
-                const _tx = curX, _ty = curLookY, _tz = _lookAtZ; // look target
-                let _vx = _camX - _tx, _vy = _camY - _ty, _vz = _camZ - _tz;
-                _vx *= _distMul; _vy *= _distMul; _vz *= _distMul; // zoom (dolly)
-                _vy *= _heightMul;                                 // height
-                const _cy = Math.cos(_yaw), _sy = Math.sin(_yaw);  // orbit around Y
-                const _rx = _vx * _cy - _vz * _sy, _rz = _vx * _sy + _vz * _cy;
-                _camX = _tx + _rx; _camY = _ty + _vy; _camZ = _tz + _rz;
-            }
-            cam.position.set(_camX, _camY, _camZ);
-
-            // Self-correcting look-at Y: project the fretboard's near-edge centre
-            // to NDC space. If it drifts toward the frame edge, nudge tgtLookY
-            // toward the fretboard centre so the camera tilts to re-frame it.
-            // This lets the camera adapt to any panel aspect ratio automatically.
-            const fretMidY = (sY(0) + sY(nStr - 1)) / 2;
-            _probe.set(curX, fretMidY, 0);                  // play-line fretboard centre
-            cam.lookAt(curX, curLookY + _poseLookYAdd, _lookAtZ);    // tentative look — needed for project()
-            cam.updateMatrixWorld();
-            _probe.project(cam);                             // _probe.y → NDC in [-1, 1]
-
-            // Keep fretboard centre in the lower third of the screen (NDC ≈ -0.35).
-            // The deadband width and correction strength are both blended
-            // between Twitchy and Calm bounds by the user's tiltSmoothing
-            // setting — twitchy = re-frame aggressively (narrow band, strong
-            // nudge); calm = let small drift ride (wide band, weak nudge).
-            const DESIRED_NDC_Y = -0.35;
-            const tiltBand   = CAM_TILT_BAND_T + (CAM_TILT_BAND_C - CAM_TILT_BAND_T) * tiltSmoothing;
-            const tiltStr    = CAM_TILT_STR_T  + (CAM_TILT_STR_C  - CAM_TILT_STR_T)  * tiltSmoothing;
-            if (_probe.y < DESIRED_NDC_Y - tiltBand || _probe.y > DESIRED_NDC_Y + tiltBand) {
-                // _probe.y too low → fretboard near bottom → tgtLookY decreases → camera tilts down → fretboard rises
-                // _probe.y too high → fretboard near top  → tgtLookY increases → camera tilts up   → fretboard drops
-                const correction = (DESIRED_NDC_Y - _probe.y) * fretMidY * tiltStr;
-                tgtLookY = Math.max(-fretMidY, Math.min(fretMidY, tgtLookY - correction));
-            }
-            curLookY += (tgtLookY - curLookY) * lerp;
-
-            // Final look-at with the corrected Y (overrides the tentative one above).
-            // User tilt (pitch) + pan offsets layer on top when the free-cam is
-            // enabled; each is coerced to a finite number to avoid a NaN look-at.
-            if (_freeCam && _freeCam.enabled) {
-                const _panX = Number.isFinite(_freeCam.panX) ? _freeCam.panX : 0;
-                const _panY = Number.isFinite(_freeCam.panY) ? _freeCam.panY : 0;
-                const _pitch = Number.isFinite(_freeCam.pitch) ? _freeCam.pitch : 0;
-                cam.lookAt(curX + _panX * K, curLookY + (_pitch + _panY) * K, _lookAtZ);
-            } else {
-                cam.lookAt(curX, curLookY + _poseLookYAdd, _lookAtZ);
-            }
-
-            // ── Fret-row fit guard ────────────────────────────────────────────
-            // Project the fret-number-row band (just below the lowest string, at
-            // the play line) with the final camera. If it sits below the safe
-            // bottom line, dolly back (raise _fretRowFitBoost → applied to the
-            // curDist lerp target next frame) until it clears; relax lazily once
-            // there's comfortable headroom. Asymmetric + deadbanded so it
-            // converges without hunting, and capped so the zoom can't pop. It
-            // cooperates with the tilt loop above rather than fighting it: pulling
-            // back shrinks the scene, the tilt loop keeps the board centre anchored
-            // at DESIRED_NDC_Y, so only the row's bottom headroom changes. Skipped
-            // while the free-cam (Camera Director) owns the view.
-            if (_freeCam && _freeCam.enabled) {
-                if (_fretRowFitBoost !== 1) _fretRowFitBoost = 1;
-            } else {
-                cam.updateMatrixWorld();
-                const _rowY = Math.min(sY(0), sY(nStr - 1)) - S_GAP * 1.4;
-                _probe.set(curX, _rowY, 0.5 * K);
-                _probe.project(cam);                              // _probe.y → NDC; < -1 = off the bottom
-                const _rowNdcY = _probe.y;
-                if (_rowNdcY < FRET_ROW_FIT_NDC_MIN) {
-                    // Row below the safe line → pull back promptly, proportional to
-                    // the deficit so it converges in a few frames without overshoot.
-                    const _need = FRET_ROW_FIT_NDC_MIN - _rowNdcY;
-                    _fretRowFitBoost = Math.min(FRET_ROW_FIT_BOOST_MAX,
-                        _fretRowFitBoost + Math.min(0.05, _need * 0.4));
-                } else if (_rowNdcY > FRET_ROW_FIT_NDC_MIN + FRET_ROW_FIT_DEADBAND
-                           && _fretRowFitBoost > 1) {
-                    // Comfortable headroom → relax the dolly back toward normal, lazily.
-                    _fretRowFitBoost = Math.max(1, _fretRowFitBoost - 0.01);
-                }
-            }
-        }
+        /* ── h3d-carve-9: W-section (camera lerp) → src/camera.js ─────── */
+        const { effectiveVfov, camUpdate } = createCamera({
+            // Constants
+            BASE_VFOV, HORPLUS_START_ASPECT, HORPLUS_MIN_VFOV,
+            CAM_LERP_BASE, CAM_H_BASE, CAM_DIST_BASE,
+            CAM_FRAME_DIST_NEAR, CAM_FRAME_DIST_FAR,
+            CAM_FRAME_H_NEAR, CAM_FRAME_H_FAR,
+            CAM_FRAME_D_NEAR, CAM_FRAME_D_FAR,
+            FOCUS_D, S_GAP, K,
+            FRET_ROW_FIT_NDC_MIN, FRET_ROW_FIT_DEADBAND, FRET_ROW_FIT_BOOST_MAX,
+            CAM_TILT_BAND_T, CAM_TILT_BAND_C, CAM_TILT_STR_T, CAM_TILT_STR_C,
+            // Live-accessor getters
+            getCam: () => cam,
+            getTgtX: () => tgtX, getTgtDist: () => tgtDist,
+            getAspectScale: () => aspectScale, getLeftyCached: () => _leftyCached,
+            getNStr: () => nStr, getProbe: () => _probe,
+            getTiltSmoothing: () => tiltSmoothing,
+            getPaneAspect: () => _paneAspect, getPaneUid: () => _paneUid,
+            getHighwayCanvas: () => highwayCanvas,
+            // Getter+setter pairs (write-backs)
+            getCurX: () => curX, setCurX: (v) => { curX = v; },
+            getCurDist: () => curDist, setCurDist: (v) => { curDist = v; },
+            getCurLookY: () => curLookY, setCurLookY: (v) => { curLookY = v; },
+            getTgtLookY: () => tgtLookY, setTgtLookY: (v) => { tgtLookY = v; },
+            getFretRowFitBoost: () => _fretRowFitBoost, setFretRowFitBoost: (v) => { _fretRowFitBoost = v; },
+            // Function refs
+            sY,
+            freeCamFor: _freeCamFor,
+            aspectPaneKey: _aspectPaneKey,
+            resolveTuneFor: _resolveTuneFor,
+            aspectRegisterPane: _aspectRegisterPane,
+        });
 
         /* ── Resize helper ───────────────────────────────────────────────── */
         function applySize(w, h) {

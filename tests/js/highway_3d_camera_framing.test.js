@@ -24,6 +24,9 @@ const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
 const src = fs.readFileSync(SCREEN_JS, 'utf8');
+// h3d-carve-9: camUpdate body moved here; tests that pin its internals retarget to cameraSrc.
+const CAMERA_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'camera.js');
+const cameraSrc = fs.readFileSync(CAMERA_JS, 'utf8');
 
 // ── Zoom-dependent framing ──────────────────────────────────────────────────
 
@@ -43,13 +46,14 @@ test('cam.position uses interpolated framing multipliers, not literals', () => {
     // The base position is assigned into _camX/_camY/_camZ so the opt-in
     // free-camera bridge (#771) can layer orbit/zoom/height on top before the
     // single cam.position.set; the multipliers must still feed _camY/_camZ.
+    // h3d-carve-9: camUpdate (and these locals) moved to src/camera.js.
     assert.match(
-        src,
+        cameraSrc,
         /_camX\s*=\s*curX\s*\+\s*shoulderOffset\s*,\s*_camY\s*=\s*h\s*\*\s*_hMul\s*,\s*_camZ\s*=\s*dist\s*\*\s*_dMul/,
         'the base camera position must use the interpolated _hMul / _dMul multipliers',
     );
     assert.match(
-        src,
+        cameraSrc,
         /cam\.position\.set\(\s*_camX\s*,\s*_camY\s*,\s*_camZ\s*\)/,
         'cam.position.set must apply the computed _camX / _camY / _camZ',
     );
@@ -57,18 +61,19 @@ test('cam.position uses interpolated framing multipliers, not literals', () => {
 
 test('framing multipliers are a clamped zoom-distance interpolation', () => {
     // _zt is clamped to [0,1] and lerps each multiplier between NEAR and FAR.
+    // h3d-carve-9: camUpdate (and these expressions) moved to src/camera.js.
     assert.match(
-        src,
+        cameraSrc,
         /Math\.max\(0,\s*Math\.min\(1,[\s\S]*?CAM_FRAME_DIST_NEAR[\s\S]*?CAM_FRAME_DIST_FAR/,
         '_zt must clamp (dist - NEAR)/(FAR - NEAR) into [0,1]',
     );
     assert.match(
-        src,
+        cameraSrc,
         /CAM_FRAME_H_NEAR\s*\+\s*\(\s*CAM_FRAME_H_FAR\s*-\s*CAM_FRAME_H_NEAR\s*\)\s*\*\s*_zt/,
         'height multiplier must lerp NEAR->FAR by _zt',
     );
     assert.match(
-        src,
+        cameraSrc,
         /CAM_FRAME_D_NEAR\s*\+\s*\(\s*CAM_FRAME_D_FAR\s*-\s*CAM_FRAME_D_NEAR\s*\)\s*\*\s*_zt/,
         'depth multiplier must lerp NEAR->FAR by _zt',
     );
@@ -146,29 +151,32 @@ test('fret-row fit guard constants are defined', () => {
 
 test('the curDist lerp target applies the fit-guard dolly boost', () => {
     // The span-driven tgtDist still owns zooming in; the boost only pulls back.
+    // h3d-carve-9: camUpdate (and this expression) moved to src/camera.js.
+    // tgtDist is DI-rewired to getTgtDist() direct call.
     assert.match(
-        src,
-        /curDist\s*\+=\s*\(\s*tgtDist\s*\*\s*_fretRowFitBoost\s*-\s*curDist\s*\)\s*\*\s*lerp/,
-        'curDist must lerp toward tgtDist * _fretRowFitBoost',
+        cameraSrc,
+        /curDist\s*\+=\s*\(\s*getTgtDist\(\)\s*\*\s*_fretRowFitBoost\s*-\s*curDist\s*\)\s*\*\s*lerp/,
+        'curDist must lerp toward getTgtDist() * _fretRowFitBoost',
     );
 });
 
 test('the guard projects the fret-row band and adjusts the boost with hysteresis', () => {
     // Row band Y mirrors the render position (sY(lowest) - S_GAP * 1.4).
+    // h3d-carve-9: camUpdate (and this logic) moved to src/camera.js.
     assert.match(
-        src,
+        cameraSrc,
         /Math\.min\(\s*sY\(0\)\s*,\s*sY\(nStr\s*-\s*1\)\s*\)\s*-\s*S_GAP\s*\*\s*1\.4/,
         'the guard must probe the same row band the fret-number row is drawn at',
     );
     // Prompt pull-back when below the min, capped at BOOST_MAX.
     assert.match(
-        src,
+        cameraSrc,
         /_rowNdcY\s*<\s*FRET_ROW_FIT_NDC_MIN[\s\S]*?Math\.min\(\s*FRET_ROW_FIT_BOOST_MAX/,
         'below the min NDC the boost rises, capped at FRET_ROW_FIT_BOOST_MAX',
     );
     // Lazy relax only once past the deadband, floored at 1.
     assert.match(
-        src,
+        cameraSrc,
         /_rowNdcY\s*>\s*FRET_ROW_FIT_NDC_MIN\s*\+\s*FRET_ROW_FIT_DEADBAND[\s\S]*?Math\.max\(\s*1\s*,\s*_fretRowFitBoost/,
         'past the deadband the boost relaxes back toward 1',
     );
@@ -176,8 +184,9 @@ test('the guard projects the fret-row band and adjusts the boost with hysteresis
 
 test('the fit guard yields to the free-cam (Camera Director)', () => {
     // When the free-cam owns the view the auto dolly must reset to 1, not fight it.
+    // h3d-carve-9: camUpdate (and this guard) moved to src/camera.js.
     assert.match(
-        src,
+        cameraSrc,
         /if\s*\(\s*_freeCam\s*&&\s*_freeCam\.enabled\s*\)\s*\{\s*if\s*\(\s*_fretRowFitBoost\s*!==\s*1\s*\)\s*_fretRowFitBoost\s*=\s*1/,
         'with the free-cam enabled the guard must drop any auto dolly back to 1',
     );

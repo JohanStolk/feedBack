@@ -21,7 +21,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
+const CAMERA_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'camera.js'); // h3d-carve-9
 const src = fs.readFileSync(SCREEN_JS, 'utf8');
+const cameraSrc = fs.readFileSync(CAMERA_JS, 'utf8'); // h3d-carve-9: effectiveVfov/camUpdate moved here
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -53,16 +55,18 @@ test('the Hor+ start-aspect and min-vfov defaults exist', () => {
 test('effectiveVfov returns the base fov when the bridge is off/absent', () => {
     // The disabled / malformed-input guard returns `base` before any Hor+ math,
     // so normal panes are unaffected when __h3dAspectTune is missing or off.
+    // h3d-carve-9: effectiveVfov moved to src/camera.js — retarget to cameraSrc.
     assert.match(
-        src,
+        cameraSrc,
         /function\s+effectiveVfov\s*\(\s*aspect\s*,\s*tune\s*\)\s*\{[\s\S]*?if\s*\(\s*!tune\s*\|\|\s*!tune\.enabled[\s\S]*?return\s+base\s*;/,
         'effectiveVfov must short-circuit to the base fov when disabled',
     );
 });
 
 test('effectiveVfov is a no-op at/under the start aspect', () => {
+    // h3d-carve-9: effectiveVfov moved to src/camera.js — retarget to cameraSrc.
     assert.match(
-        src,
+        cameraSrc,
         /if\s*\(\s*aspect\s*<=\s*start\s*\)\s*return\s+base\s*;/,
         'effectiveVfov must return base when aspect <= start (no-op for normal/2x2 panes)',
     );
@@ -121,10 +125,11 @@ test('applySize caches the pane aspect for camUpdate', () => {
 });
 
 test('camUpdate resolves a per-pane tune and respects splitOnly', () => {
+    // h3d-carve-9: camUpdate moved to src/camera.js; resolveTuneFor is DI-renamed.
     assert.match(
-        src,
-        /const\s+_aspTune\s*=\s*_resolveTuneFor\(\s*_paneKey\s*\)\s*;[\s\S]*?_aspTune\.splitOnly\s*&&\s*!_ssActive\(\)/,
-        'camUpdate must resolve the tune per pane via _resolveTuneFor(_paneKey) and gate splitOnly',
+        cameraSrc,
+        /const\s+_aspTune\s*=\s*resolveTuneFor\(\s*_paneKey\s*\)\s*;[\s\S]*?_aspTune\.splitOnly\s*&&\s*!_ssActive\(\)/,
+        'camUpdate must resolve the tune per pane via resolveTuneFor(_paneKey) and gate splitOnly',
     );
 });
 
@@ -170,7 +175,8 @@ test('a Target select and pane registry drive the per-pane picker', () => {
         'the panel must build a Target <select>');
     assert.match(src, /function\s+_aspectRegisterPane\s*\(/,
         '_aspectRegisterPane must record live panes for the picker');
-    assert.match(src, /if\s*\(\s*window\.__h3dAspectPanelOpen\s*\)\s*_aspectRegisterPane\(\s*_paneKey\s*\)/,
+    // h3d-carve-9: camUpdate moved to camera.js; fn-ref DI-renamed (no underscore).
+    assert.match(cameraSrc, /if\s*\(\s*window\.__h3dAspectPanelOpen\s*\)\s*aspectRegisterPane\(\s*_paneKey\s*\)/,
         'camUpdate must register its pane only while the tuner panel is open');
 });
 
@@ -183,9 +189,11 @@ test('panes are keyed by arrangement (stable across songs, no split-API dep)', (
         /function\s+_aspectPaneKey\s*\(\s*arrangement\s*,\s*uid\s*\)[\s\S]*?'arr:'\s*\+\s*a[\s\S]*?'pane:'\s*\+\s*uid/,
         '_aspectPaneKey must prefer arr:<name> and fall back to pane:<uid>',
     );
+    // h3d-carve-9: camUpdate moved to camera.js; fn-ref DI-renamed (no underscore),
+    // _paneUid replaced by getPaneUid() accessor call.
     assert.match(
-        src,
-        /const\s+_paneKey\s*=\s*_aspectPaneKey\(\s*[\s\S]*?songInfo[\s\S]*?arrangement\s*,\s*_paneUid\s*\)\s*;/,
+        cameraSrc,
+        /const\s+_paneKey\s*=\s*aspectPaneKey\(\s*[\s\S]*?songInfo[\s\S]*?arrangement\s*,\s*getPaneUid\(\)\s*\)\s*;/,
         'camUpdate must key the pane by arrangement (with the uid fallback)',
     );
 });
@@ -286,8 +294,9 @@ test('the panel has a dismiss (close) control', () => {
 test('camUpdate only writes cam.fov when it actually changes', () => {
     // Guarding the write avoids a per-frame updateProjectionMatrix on a steady
     // pane and keeps the disabled path free.
+    // h3d-carve-9: camUpdate moved to src/camera.js — retarget to cameraSrc.
     assert.match(
-        src,
+        cameraSrc,
         /Math\.abs\(\s*_vfov\s*-\s*cam\.fov\s*\)\s*>\s*1e-4[\s\S]*?cam\.fov\s*=\s*_vfov\s*;[\s\S]*?cam\.updateProjectionMatrix\(\)/,
         'camUpdate must guard the cam.fov write behind a change check',
     );

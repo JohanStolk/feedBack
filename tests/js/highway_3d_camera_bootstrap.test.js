@@ -16,6 +16,9 @@ const src = fs.readFileSync(SCREEN_JS, 'utf8');
 // Since h3d-carve-1b, hwyFirstRelevantFrettedTime lives in geometry.js.
 const GEOMETRY_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'geometry.js');
 const geoSrc = fs.readFileSync(GEOMETRY_JS, 'utf8');
+// h3d-carve-9: camUpdate body moved to camera.js — extractFn retargets there.
+const CAMERA_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'camera.js');
+const cameraSrc = fs.readFileSync(CAMERA_JS, 'utf8');
 
 function extractFn(source, name) {
     const start = source.indexOf('function ' + name);
@@ -209,12 +212,36 @@ test('Camera Director still layers after the bootstrapped auto-framing base', ()
         'bootstrap must only initialize base framing, never mutate Camera Director state',
     );
 
-    const camUpdate = extractFn(src, 'camUpdate');
-    const baseIndex = camUpdate.indexOf('curX += (tgtX - curX) * lerp');
+    // h3d-carve-9: extractFn must target cameraSrc — src holds only the tombstone.
+    // tgtX is DI-rewired to getTgtX() direct call in camera.js.
+    const camUpdate = extractFn(cameraSrc, 'camUpdate');
+    const baseIndex = camUpdate.indexOf('curX += (getTgtX() - curX) * lerp');
     const directorIndex = camUpdate.indexOf('if (_freeCam && _freeCam.enabled)');
     const positionIndex = camUpdate.indexOf('cam.position.set(_camX, _camY, _camZ)');
     assert.ok(
         baseIndex >= 0 && directorIndex > baseIndex && positionIndex > directorIndex,
         'Camera Director transforms must remain layered after base framing and before camera placement',
+    );
+});
+
+// ── h3d-carve-9: setter class-killers (write-back pairs must survive DI) ────
+// Severing the call turns the test RED: a silent local var replaces the
+// write-back and the IIFE-scope var is never updated.
+
+test('setCurX write-back is called in camUpdate (curX persists across frames)', () => {
+    // Silencing: sed 's/setCurX(curX)/\/\/ GUTTED/' → this test fails.
+    assert.match(
+        cameraSrc,
+        /setCurX\(\s*curX\s*\)/,
+        'camUpdate must write curX back via setCurX(); removing it silences the update',
+    );
+});
+
+test('setFretRowFitBoost write-back is called in camUpdate (boost persists across frames)', () => {
+    // Silencing: sed 's/setFretRowFitBoost(_fretRowFitBoost)/\/\/ GUTTED/' → RED.
+    assert.match(
+        cameraSrc,
+        /setFretRowFitBoost\(\s*_fretRowFitBoost\s*\)/,
+        'camUpdate must write _fretRowFitBoost back via setFretRowFitBoost(); removing it silences the boost',
     );
 });
