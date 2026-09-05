@@ -107,6 +107,7 @@ export function createRenderer({
     FRET_WIRE_HIT_OP, FRET_WIRE_IDLE_HEX, FRET_WIRE_IDLE_OP,
     HWY_LANE_STRIPE_OP_BASE, HWY_LANE_STRIPE_OP_INT, HWY_LANE_TIME_SLICES,
     NEXT_ON_STRING_T_EPS, _ND_UNMATCHED_LATCH_AFTER, VENUE_LANE_OP_BOOST,
+    _CV_KEY_TIME_MUL, _CV_KEY_TIME_SLOT,
     MAX_RENDER_STRINGS,
     // ── Category C — fn-refs / let-vars ──────────────────────────────────
     activePalette, anchorLaneBoundsAt, anchorPlayedFretSpanAt,
@@ -195,8 +196,9 @@ export function createRenderer({
     const _scrStrGlow            = new Array(MAX_RENDER_STRINGS).fill(0.5);
     const _scrStringAnticipation = new Array(MAX_RENDER_STRINGS).fill(0);
     const _scrStringSustain      = new Array(MAX_RENDER_STRINGS).fill(false);
-    const _CV_KEY_TIME_MUL = 1e4;
-    const _CV_KEY_TIME_SLOT = 1e6;
+    // _CV_KEY_TIME_MUL / _CV_KEY_TIME_SLOT live in screen.js scope so that
+    // _encodeChordVerdictKey (defined and DI'd from there) can read them.
+    // renderer.js receives them as DI shorthands.
 
 function lookaheadSmoothCamStep(dtSec, tgtXWorld, tgtSpanInt) {
     const d = Math.min(0.2, Math.max(1e-4, dtSec));

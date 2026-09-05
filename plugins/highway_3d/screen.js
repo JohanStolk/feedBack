@@ -3570,6 +3570,10 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
         // ``time * 1e4`` keeps a 0.1 ms resolution — more than enough
         // to disambiguate distinct chord onsets — and stays under the
         // safe-integer limit for any realistic song length.
+        // Key-encoding constants — also DI'd to renderer.js as shorthands so the
+        // pruning pass in update() shares the same resolution without a dual definition.
+        const _CV_KEY_TIME_MUL = 1e4;
+        const _CV_KEY_TIME_SLOT = 1e6;
         function _encodeChordVerdictKey(ch) {
             const tSlot = Math.round(ch.t * _CV_KEY_TIME_MUL) * _CV_KEY_TIME_SLOT;
             const idSlot = ch.id != null ? ((Number(ch.id) | 0) + 1) : 0;
@@ -6975,6 +6979,7 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
             FRET_WIRE_HIT_OP, FRET_WIRE_IDLE_HEX, FRET_WIRE_IDLE_OP,
             HWY_LANE_STRIPE_OP_BASE, HWY_LANE_STRIPE_OP_INT, HWY_LANE_TIME_SLICES,
             NEXT_ON_STRING_T_EPS, _ND_UNMATCHED_LATCH_AFTER, VENUE_LANE_OP_BOOST,
+            _CV_KEY_TIME_MUL, _CV_KEY_TIME_SLOT,
             MAX_RENDER_STRINGS,
             // ── Category C — fn-refs / let-vars ────────────────────────────────
             activePalette, anchorLaneBoundsAt, anchorPlayedFretSpanAt,

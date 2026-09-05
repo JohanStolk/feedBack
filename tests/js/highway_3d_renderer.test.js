@@ -42,8 +42,10 @@ test('screen.js imports createRenderer from renderer.js', () => {
         'screen.js must import createRenderer');
 });
 
-test('screen.js wiring block contains expected DI param count (313)', () => {
-    // 313 = 105 getters + 48 setters + 160 shorthands
+test('screen.js wiring block contains expected DI param count (315)', () => {
+    // 315 = 105 getters + 48 setters + 162 shorthands
+    // 313→315: +2 Toby r3 F1 fix: _CV_KEY_TIME_MUL, _CV_KEY_TIME_SLOT restored to
+    //   screen.js scope and added as shorthands (were wrongly moved to renderer closure).
     // 184→313: +129 carve-15 full completion:
     //   +43 Category B consts, +37 Category C fn-refs, +3 Category D getters,
     //   +27 Category E getter/setter pairs + 1 stable ref,
@@ -66,7 +68,7 @@ test('screen.js wiring block contains expected DI param count (313)', () => {
     }, 0);
 
     const total = getterCount + setterCount + shorthandCount;
-    assert.strictEqual(total, 313,
+    assert.strictEqual(total, 315,
         `DI param count mismatch: got ${total} (getters=${getterCount}, setters=${setterCount}, shorthands=${shorthandCount})`);
 });
 
@@ -194,7 +196,8 @@ test('all shorthand identifiers in factory wiring calls are declared in screen.j
         /createArp\(\{([\s\S]*?)\}\)/,
         /createNoteRenderer\(\{([\s\S]*?)\}\)/,
         /createCamera\(\{([\s\S]*?)\}\)/,
-        /const \{ update \} = createRenderer\(\{([\s\S]*?)\}\)/,
+        // After F1-prewarm fix the destructure has multiple names; match any {…update…} form.
+        /const \{[^}]*update[^}]*\} = createRenderer\(\{([\s\S]*?)\}\)/,
     ];
 
     // Build scope corpus: screenSrc with all wiring blocks blanked
@@ -214,6 +217,19 @@ test('all shorthand identifiers in factory wiring calls are declared in screen.j
                 allMissing.push(name);
             }
         }
+    }
+
+    // Anti-vacuity: if the createRenderer regex fails to match the wiring block
+    // (e.g. the destructure pattern changed), shorthands would be 0 and the loop
+    // silently passes with no actual checks. Assert a realistic floor.
+    {
+        const renPat = /const \{[^}]*update[^}]*\} = createRenderer\(\{([\s\S]*?)\}\)/;
+        const renM = screenSrc.match(renPat);
+        assert.ok(renM, 'createRenderer wiring regex must match screen.js — regex vacuity guard');
+        const renShorthands = extractShorthands(renM[renM.length - 1]);
+        assert.ok(renShorthands.size >= 150,
+            `createRenderer wiring must have >=150 shorthand params (got ${renShorthands.size}) — ` +
+            `regex matched too little or wiring block shrank unexpectedly`);
     }
 
     assert.deepEqual(allMissing.sort(), [],
@@ -312,15 +328,41 @@ test('F1: screen.js destructures _prewarmStatic and _prewarmChart from createRen
         'screen.js must destructure _prewarmStatic and _prewarmChart from createRenderer return');
 });
 
-// ── 23. ACTUAL EXECUTION SMOKE TEST ─────────────────────────────────────────
+// ── 26. Toby r3 F1 kill test — _CV_KEY_TIME consts in screen.js scope ────────
+// _encodeChordVerdictKey is defined in screen.js IIFE scope and reads
+// _CV_KEY_TIME_MUL / _CV_KEY_TIME_SLOT from that same scope. These were
+// incorrectly moved to renderer.js closure in 06e4fe3, making them invisible to
+// _encodeChordVerdictKey → ReferenceError on any chord-template chart frame.
+// RED at 06e4fe3: consts absent from screen.js. GREEN at fix tip: restored.
+test('_CV_KEY_TIME_MUL and _CV_KEY_TIME_SLOT are declared in screen.js before _encodeChordVerdictKey', () => {
+    const mulIdx    = screenSrc.indexOf('const _CV_KEY_TIME_MUL');
+    const slotIdx   = screenSrc.indexOf('const _CV_KEY_TIME_SLOT');
+    const fnIdx     = screenSrc.indexOf('function _encodeChordVerdictKey');
+    assert.ok(mulIdx  !== -1, '_CV_KEY_TIME_MUL must be declared in screen.js (not only in renderer.js closure)');
+    assert.ok(slotIdx !== -1, '_CV_KEY_TIME_SLOT must be declared in screen.js');
+    assert.ok(fnIdx   !== -1, '_encodeChordVerdictKey must still exist in screen.js');
+    assert.ok(mulIdx  < fnIdx, '_CV_KEY_TIME_MUL must be declared before _encodeChordVerdictKey in screen.js');
+    assert.ok(slotIdx < fnIdx, '_CV_KEY_TIME_SLOT must be declared before _encodeChordVerdictKey in screen.js');
+});
+
+// ── 23–25. ACTUAL EXECUTION SMOKE TEST ──────────────────────────────────────
 // Loads createRenderer via new Function (strips ESM import/export) so it runs
 // in a CJS test context with fully-stub DI. Proves update() does not throw.
+//
+// ⚠ new Function sloppy-mode hole: the stripped module runs outside strict mode,
+// so reading an undeclared variable evaluates to undefined (sloppy) rather than
+// throwing ReferenceError (strict). This means the smoke alone cannot catch a
+// missing DI param — it would silently receive undefined and might not throw.
+// The compensating layer is eslint no-undef on renderer.js (run at commit time),
+// which IS strict-mode-aware and catches all undeclared reads regardless of the
+// test environment. These two gates together provide the full guarantee:
+// eslint=0 proves no undeclared names; smoke proves update() executes end-to-end.
 //
 // RED at d475899: first execution would crash with
 //   ReferenceError: ACCENT_NOTE_FILL_BOOST is not defined
 // because Category-B consts were read from renderer.js scope but were never
 // declared inside it (they lived only in screen.js's IIFE and ES-module scope
-// never chains into an IIFE). GREEN at this commit: all 313 DI params wired.
+// never chains into an IIFE). GREEN at this commit: all 313+ DI params wired.
 {
     // Stub window for Node (renderer.js reads window.feedBack, guarded by &&)
     if (typeof global.window === 'undefined') global.window = {};
@@ -385,6 +427,7 @@ test('F1: screen.js destructures _prewarmStatic and _prewarmChart from createRen
             HWY_LANE_STRIPE_OP_BASE: 0.3, HWY_LANE_STRIPE_OP_INT: 0.15,
             HWY_LANE_TIME_SLICES: 8, NEXT_ON_STRING_T_EPS: 0.01,
             _ND_UNMATCHED_LATCH_AFTER: 0.2, VENUE_LANE_OP_BOOST: 0.5,
+            _CV_KEY_TIME_MUL: 1e4, _CV_KEY_TIME_SLOT: 1e6,
             MAX_RENDER_STRINGS: 8,
             // C — fn-refs
             sY: (s) => s * 0.1, xFret: (f) => f * 0.05, xFretMid: (f) => f * 0.05,
