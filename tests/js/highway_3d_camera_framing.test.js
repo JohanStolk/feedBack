@@ -98,27 +98,29 @@ test('measure-start cache only keeps beats with measure >= 0', () => {
 });
 
 test('lookaheadEndTime targets the measure CAM_LOOKAHEAD_MEASURES ahead', () => {
+    // h3d-carve-13: lookaheadEndTime moved to src/camera.js — retarget to cameraSrc.
     assert.match(
-        src,
+        cameraSrc,
         /function\s+lookaheadEndTime\s*\(\s*now\s*\)/,
         'lookaheadEndTime(now) helper must exist',
     );
     assert.match(
-        src,
+        cameraSrc,
         /const\s+targetIdx\s*=\s*curIdx\s*\+\s*CAM_LOOKAHEAD_MEASURES/,
         'target measure index = current measure + CAM_LOOKAHEAD_MEASURES',
     );
     // No beats → seconds fallback.
     assert.match(
-        src,
+        cameraSrc,
         /if\s*\(\s*!ms\s*\|\|\s*ms\.length\s*===\s*0\s*\)\s*return\s+now\s*\+\s*CAM_LOOKAHEAD_SEC/,
         'lookaheadEndTime must fall back to seconds when there are no measures',
     );
 });
 
 test('fret-bounds scan drives its window off lookaheadEndTime, not fixed seconds', () => {
+    // h3d-carve-13: lookaheadComputeFretBounds moved to src/camera.js — retarget to cameraSrc.
     assert.match(
-        src,
+        cameraSrc,
         /function\s+lookaheadComputeFretBounds[\s\S]*?const\s+tEnd\s*=\s*lookaheadEndTime\(\s*now\s*\)/,
         'lookaheadComputeFretBounds must derive tEnd from lookaheadEndTime(now)',
     );

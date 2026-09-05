@@ -263,7 +263,8 @@ test('createCamera({...}) wiring has correct naming correspondence (no param swa
     };
 
     // 1. Extract the argument block from the createCamera call.
-    const ANCHOR = 'const { effectiveVfov, camUpdate } = createCamera({';
+    // h3d-carve-13: destructure expanded with lookahead exports — update anchor string.
+    const ANCHOR = 'const { effectiveVfov, camUpdate, lookaheadBootstrapTime, lookaheadComputeFretBounds, lookaheadTargetWorldX } = createCamera({';
     const callStart = src.indexOf(ANCHOR);
     assert.ok(callStart >= 0, 'createCamera call must be findable in screen.js');
     const blockStart = callStart + ANCHOR.length - 1; // points to the opening {
