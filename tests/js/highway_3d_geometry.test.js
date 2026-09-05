@@ -78,3 +78,40 @@ test('computeBPM estimates 120 BPM from evenly-spaced beats', async () => {
     const bpm = computeBPM(beats, 1.0);
     assert.ok(Math.abs(bpm - 120) < 0.01, `expected ~120 BPM, got ${bpm}`);
 });
+
+// Toby r1 findings: camBaseDistU, camLowFretPullbackU, _makeGaussTex had no
+// class-killer tests. Each test below names the concrete mutation it catches.
+
+test('camBaseDistU clamps span to minimum 4 — span=0 gives 77 not 65', async () => {
+    // Mutation: Math.max(span,4) → span
+    // camBaseDistU(0) mutant = 65+0*3 = 65 (wrong); original = 65+4*3 = 77
+    const { camBaseDistU } = await import(GEOMETRY_JS);
+    assert.strictEqual(camBaseDistU(0),  77, 'span=0: floor=4 so 65+4*3=77, not 65');
+    assert.strictEqual(camBaseDistU(10), 95, 'span=10: 65+10*3=95');
+});
+
+test('camLowFretPullbackU is clamped to zero — high fret gives 0 not negative', async () => {
+    // Mutation: drop Math.max(0,...) clamp
+    // camLowFretPullbackU(10) mutant = (5-10)*4 = -20 (wrong); original = 0
+    const { camLowFretPullbackU } = await import(GEOMETRY_JS);
+    assert.strictEqual(camLowFretPullbackU(0),  20, 'fret 0: (5-0)*4=20');
+    assert.strictEqual(camLowFretPullbackU(5),   0, 'fret 5: (5-5)*4=0');
+    assert.strictEqual(camLowFretPullbackU(10),  0, 'fret 10: clamped to 0, not -20');
+});
+
+test('_makeGaussTex peak alpha is 255 at the centre pixel', async () => {
+    // Mutation: default sigma changed to 0 → (u-0.5)/0 = NaN chain → all Uint8Array writes
+    // become 0 (TypedArray coerces NaN to 0). Test calls without explicit sigma so the
+    // default is exercised directly — changing the default is what is being guarded.
+    // Use odd width=3: i=1 gives u=0.5 exactly (d=(u-0.5)/sigma=0, peak=1, alpha=255).
+    const { _makeGaussTex } = await import(GEOMETRY_JS);
+    let capturedData;
+    const ThreeStub = {
+        DataTexture: class { constructor(d) { capturedData = d; } },
+        RGBAFormat: 1,
+        LinearFilter: 2,
+    };
+    _makeGaussTex(ThreeStub, 3); // no sigma arg — exercises the default (0.28)
+    // Pixel i=1: RGBA layout [4,5,6,7]; alpha is at index 7
+    assert.strictEqual(capturedData[7], 255, 'centre pixel (i=1 of w=3) alpha must be 255 at default sigma');
+});
