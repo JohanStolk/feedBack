@@ -41,6 +41,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
+// Since h3d-carve-1b, RENDER_ORDER_* constants and renderOrderForLayerAtZ
+// live in geometry.js; screen.js imports them.
+const GEOMETRY_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'geometry.js');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -53,9 +56,16 @@ function src() {
     return _src;
 }
 
-/** Parses the declared render-order layer stack from screen.js. */
+let _geo;
+/** Returns the cached geometry source (render-order constants + renderOrderForLayerAtZ). */
+function geo() {
+    if (!_geo) _geo = fs.readFileSync(GEOMETRY_JS, 'utf8');
+    return _geo;
+}
+
+/** Parses the declared render-order layer stack from geometry.js. */
 function layers() {
-    const match = src().match(/const\s+RENDER_ORDER_LAYER_STACK\s*=\s*Object\.freeze\(\s*\[([\s\S]*?)\]\s*\)/);
+    const match = geo().match(/const\s+RENDER_ORDER_LAYER_STACK\s*=\s*Object\.freeze\(\s*\[([\s\S]*?)\]\s*\)/);
     assert.ok(match, 'RENDER_ORDER_LAYER_STACK must be declared');
     return Array.from(match[1].matchAll(/'([^']+)'/g), m => m[1]);
 }
@@ -70,7 +80,7 @@ function layerIndex(name) {
 
 /** Reads the render-order base used for objects at z = 0. */
 function zZeroRenderOrder() {
-    const match = src().match(/const\s+RENDER_ORDER_AT_Z_ZERO\s*=\s*(-?\d+(?:\.\d+)?)\s*;/);
+    const match = geo().match(/const\s+RENDER_ORDER_AT_Z_ZERO\s*=\s*(-?\d+(?:\.\d+)?)\s*;/);
     assert.ok(match, 'RENDER_ORDER_AT_Z_ZERO must be declared');
     return Number(match[1]);
 }
@@ -301,14 +311,15 @@ test('chordFrameRenderOrder uses renderOrderForLayerAtZ(z, CHORD_FRAME)', () => 
         /const\s+chordFrameRenderOrder\s*=\s*renderOrderForLayerAtZ\(\s*z\s*,\s*'CHORD_FRAME'\s*\)\s*;/,
         'chordFrameRenderOrder must use renderOrderForLayerAtZ(z, CHORD_FRAME)',
     );
-    assert.match(src(), /const\s+RENDER_ORDER_LAYER_INDEX\s*=\s*Object\.freeze\(\s*RENDER_ORDER_LAYER_STACK\.reduce\(/);
-    assert.match(src(), /const\s+layerIndex\s*=\s*RENDER_ORDER_LAYER_INDEX\[layerName\]\s*;/);
-    assert.match(src(), /if\s*\(\s*layerIndex\s*===\s*undefined\s*\)\s*throw\s+new\s+Error\(`Unknown 3D highway depth layer: \$\{layerName\}`\)\s*;/);
-    assert.match(src(), /const\s+depthRenderOrder\s*=\s*Math\.max\(\s*RENDER_ORDER_FAR_CLAMP\s*,\s*Math\.round\(\s*RENDER_ORDER_AT_Z_ZERO\s*\+\s*worldZ\s*\/\s*K\s*\)\s*\)\s*;/);
+    // renderOrderForLayerAtZ implementation lives in geometry.js since h3d-carve-1b.
+    assert.match(geo(), /const\s+RENDER_ORDER_LAYER_INDEX\s*=\s*Object\.freeze\(\s*RENDER_ORDER_LAYER_STACK\.reduce\(/);
+    assert.match(geo(), /const\s+layerIndex\s*=\s*RENDER_ORDER_LAYER_INDEX\[layerName\]\s*;/);
+    assert.match(geo(), /if\s*\(\s*layerIndex\s*===\s*undefined\s*\)\s*throw\s+new\s+Error\(`Unknown 3D highway depth layer: \$\{layerName\}`\)\s*;/);
+    assert.match(geo(), /const\s+depthRenderOrder\s*=\s*Math\.max\(\s*RENDER_ORDER_FAR_CLAMP\s*,\s*Math\.round\(\s*RENDER_ORDER_AT_Z_ZERO\s*\+\s*worldZ\s*\/\s*K\s*\)\s*\)\s*;/);
     // Layer is a sub-unit fraction so the integer depth bucket strictly
     // dominates (a farther object can't outrank a nearer one via a higher
     // layer); the layer only breaks ties within the same depth bucket.
-    assert.match(src(), /return\s+depthRenderOrder\s*\+\s*layerIndex\s*\/\s*RENDER_ORDER_LAYER_STACK\.length\s*;/);
+    assert.match(geo(), /return\s+depthRenderOrder\s*\+\s*layerIndex\s*\/\s*RENDER_ORDER_LAYER_STACK\.length\s*;/);
     assert.ok(layerIndex('CHORD_FRAME') < layerIndex('NOTE_OUTLINE'));
 });
 

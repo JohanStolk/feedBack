@@ -99,6 +99,67 @@ test('camLowFretPullbackU is clamped to zero — high fret gives 0 not negative'
     assert.strictEqual(camLowFretPullbackU(10),  0, 'fret 10: clamped to 0, not -20');
 });
 
+// ── Cut 1b class-killers ───────────────────────────────────────────────────────
+
+test('RENDER_ORDER_LAYER_STACK has 17 layers with CHORD_FILL first and CHORD_FRET_LABEL last', async () => {
+    const { RENDER_ORDER_LAYER_STACK } = await import(GEOMETRY_JS);
+    assert.strictEqual(RENDER_ORDER_LAYER_STACK.length, 17, 'stack must have exactly 17 layers');
+    assert.strictEqual(RENDER_ORDER_LAYER_STACK[0], 'CHORD_FILL', 'first layer must be CHORD_FILL');
+    assert.strictEqual(RENDER_ORDER_LAYER_STACK[RENDER_ORDER_LAYER_STACK.length - 1], 'CHORD_FRET_LABEL', 'last layer must be CHORD_FRET_LABEL');
+});
+
+test('RENDER_ORDER_LAYER_INDEX maps CHORD_FILL to 0 and NOTE_CORE to 10', async () => {
+    // Mutation: wrong layer order → NOTE_CORE would not map to 10.
+    const { RENDER_ORDER_LAYER_INDEX } = await import(GEOMETRY_JS);
+    assert.strictEqual(RENDER_ORDER_LAYER_INDEX['CHORD_FILL'], 0, 'CHORD_FILL must be index 0 (bottom of stack)');
+    assert.strictEqual(RENDER_ORDER_LAYER_INDEX['NOTE_CORE'], 10, 'NOTE_CORE must be index 10');
+});
+
+test('renderOrderForLayerAtZ applies the far clamp — worldZ=-5 gives 50 not 33', async () => {
+    // Mutation: remove Math.max(RENDER_ORDER_FAR_CLAMP, ...) clamp.
+    // K=2.25/300=0.0075; Math.round(700+(-5)/0.0075)=Math.round(33.33)=33; max(50,33)=50.
+    // Without clamp: 33 + 0/17 ≈ 33. Test pins the clamped value.
+    const { renderOrderForLayerAtZ } = await import(GEOMETRY_JS);
+    assert.strictEqual(renderOrderForLayerAtZ(-5, 'CHORD_FILL'), 50, 'far objects must be clamped to RENDER_ORDER_FAR_CLAMP=50');
+});
+
+test('renderOrderForLayerAtZ throws for unknown layer names', async () => {
+    const { renderOrderForLayerAtZ } = await import(GEOMETRY_JS);
+    assert.throws(() => renderOrderForLayerAtZ(0, 'NONEXISTENT'), /Unknown 3D highway depth layer/);
+});
+
+test('_noteKey integer-truncates float times — _noteKey(1.5, 3) is 150003 not 150008', async () => {
+    // Mutation: drop |0 → (15000.5)*10+3 = 150008.
+    const { _noteKey } = await import(GEOMETRY_JS);
+    assert.strictEqual(_noteKey(1.5, 3), 150003, '|0 truncation must give 150003, not float-derived 150008');
+    assert.strictEqual(_noteKey(0, 0), 0);
+});
+
+test('lowerBoundT returns first index where arr[i].t >= t (strict lower bound)', async () => {
+    // Mutation: < → <= causes lowerBoundT([{t:1},{t:3},{t:5}], 3) → 2 instead of 1.
+    const { lowerBoundT } = await import(GEOMETRY_JS);
+    const arr = [{ t: 1 }, { t: 3 }, { t: 5 }];
+    assert.strictEqual(lowerBoundT(arr, 3), 1, 'strict lower-bound: first index where .t >= 3 is 1 (not 2)');
+    assert.strictEqual(lowerBoundT(arr, 0), 0, 'value before all: must return 0');
+    assert.strictEqual(lowerBoundT(arr, 6), 3, 'value after all: must return length');
+});
+
+test('hwyFirstRelevantFrettedTime returns null for empty/all-open input', async () => {
+    const { hwyFirstRelevantFrettedTime } = await import(GEOMETRY_JS);
+    assert.strictEqual(hwyFirstRelevantFrettedTime([], [], 0, 0.2, 6), null);
+});
+
+test('geoFretMid returns -2K sentinel for f<=0, positive for f=1', async () => {
+    // Mutation: drop f<=0 guard → geoFretMid(0, true) returns (0+0)/2=0, not -0.015.
+    const { geoFretMid } = await import(GEOMETRY_JS);
+    const K = 2.25 / 300;
+    assert.ok(Math.abs(geoFretMid(0, true) - (-2 * K)) < 1e-10, 'f=0 must return -2K sentinel (≈-0.015)');
+    assert.ok(geoFretMid(1, true) > 0, 'f=1 must return positive X');
+    // In uniform mode: geoFretX(0,true)=0, geoFretX(1,true)=step, so mid=step/2.
+    // geoFretMid(2,true) = (step+2step)/2 = 1.5step. Ratio 3 catches wrong f offset.
+    assert.ok(Math.abs(geoFretMid(2, true) / geoFretMid(1, true) - 3) < 1e-9, 'uniform mid(2)/mid(1) must equal 3');
+});
+
 test('_makeGaussTex peak alpha is 255 at the centre pixel', async () => {
     // Mutation: default sigma changed to 0 → (u-0.5)/0 = NaN chain → all Uint8Array writes
     // become 0 (TypedArray coerces NaN to 0). Test calls without explicit sigma so the

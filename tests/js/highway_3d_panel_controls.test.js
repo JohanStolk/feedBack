@@ -55,7 +55,7 @@ function loadHighway3dStatics() {
             },
         },
         // Geometry stubs — panel-controls test only reads factory statics;
-        // it never invokes the render path where these are called (h3d-carve-1).
+        // it never invokes the render path where these are called (h3d-carve-1b).
         geoFretX: (f, _uniform) => f * 0.1,
         dZ: dt => -dt,
         slideTrailEnd: () => null,
@@ -63,6 +63,15 @@ function loadHighway3dStatics() {
         camLowFretPullbackU: () => 0,
         computeBPM: () => 120,
         _makeGaussTex: () => ({}),
+        RENDER_ORDER_LAYER_STACK: Object.freeze([]),
+        RENDER_ORDER_LAYER_INDEX: Object.freeze(Object.create(null)),
+        RENDER_ORDER_AT_Z_ZERO: 700,
+        RENDER_ORDER_FAR_CLAMP: 50,
+        renderOrderForLayerAtZ: () => 0,
+        _noteKey: () => 0,
+        lowerBoundT: () => 0,
+        hwyFirstRelevantFrettedTime: () => null,
+        geoFretMid: (f, _uniform) => f * 0.1,
     };
     vm.createContext(sandbox);
     vm.runInContext(instrumented, sandbox, { filename: SCREEN_JS });

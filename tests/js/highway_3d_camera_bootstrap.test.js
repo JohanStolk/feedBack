@@ -13,6 +13,9 @@ const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
 const src = fs.readFileSync(SCREEN_JS, 'utf8');
+// Since h3d-carve-1b, hwyFirstRelevantFrettedTime lives in geometry.js.
+const GEOMETRY_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'geometry.js');
+const geoSrc = fs.readFileSync(GEOMETRY_JS, 'utf8');
 
 function extractFn(source, name) {
     const start = source.indexOf('function ' + name);
@@ -36,7 +39,7 @@ function sourceBetween(startText, endText) {
 
 const hwyFirstRelevantFrettedTime = new Function(
     '"use strict";'
-    + extractFn(src, 'hwyFirstRelevantFrettedTime')
+    + extractFn(geoSrc, 'hwyFirstRelevantFrettedTime')
     + '\nreturn hwyFirstRelevantFrettedTime;',
 )();
 
