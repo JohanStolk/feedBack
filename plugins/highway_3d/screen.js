@@ -13,6 +13,7 @@ import { _bcIsDesktop, _bcCreateController, _bcLoadSettings, _bcFfIdx } from './
 import { createBgControl } from './src/bg-control.js'; // h3d-carve-5
 import { createMaterialBuilders } from './src/materials.js'; // h3d-carve-6
 import { createOverlay } from './src/overlay.js'; // h3d-carve-7
+import { createFx } from './src/fx.js'; // h3d-carve-8
 
 (function () {
     'use strict';
@@ -6378,93 +6379,26 @@ import { createOverlay } from './src/overlay.js'; // h3d-carve-7
             else _laneTargetColor = new T.Color(laneLit);
         }
 
-        /* ── Fretboard (static geometry) ────────────────────────────────── */
-        function _h3dHexOrDefault(hexStr, defHex) {
-            const d = defHex || BG_DEFAULTS.nutColor;
-            const s = (typeof hexStr === 'string' && /^#[0-9a-fA-F]{6}$/.test(hexStr.trim()))
-                ? hexStr.trim().toLowerCase()
-                : d;
-            return parseInt(s.slice(1), 16);
-        }
-        // Cinematic lighting (#2): darken ambient so emissive gems have a dark
-        // surround to pop against; strengthen the key light for modelling.
-        // Toggle via the 'cinematic' setting so it's directly comparable.
-        function _applyCinematic() {
-            if (!ambLight || !dirLight) return;
-            ambLight.intensity = _cinematic ? 0.45 : 0.85;
-            dirLight.intensity = _cinematic ? 1.15 : 0.8;
-        }
-        // #5 early/late: tint the hit feedback by timing — on-time green, early cyan,
-        // late amber. Falls back to green when timing is unknown (pure-provider path).
-        function _timingHex(ts) {
-            if (!_timingFx || !ts || ts === 'OK') return 0x22ff88;
-            if (ts === 'EARLY') return 0x35d6ff;
-            if (ts === 'LATE')  return 0xffb84d;
-            return 0x22ff88;
-        }
-        function _sparkBurst(x, y, z, hex, count) {
-            if (!_sparkPts || count <= 0) return;
-            const r = ((hex >> 16) & 255) / 255, g = ((hex >> 8) & 255) / 255, b = (hex & 255) / 255;
-            let made = 0;
-            for (let i = 0; i < _SPARK_N && made < count; i++) {
-                if (_sparkLife[i] > 0) continue;
-                const j = i * 3, ang = Math.random() * Math.PI * 2, sp = (5 + Math.random() * 12) * K;
-                _sparkPos[j] = x; _sparkPos[j + 1] = y; _sparkPos[j + 2] = z;
-                _sparkVel[j] = Math.cos(ang) * sp; _sparkVel[j + 1] = (12 + Math.random() * 24) * K; _sparkVel[j + 2] = Math.sin(ang) * sp * 0.55;
-                _sparkCol[j] = r; _sparkCol[j + 1] = g; _sparkCol[j + 2] = b;
-                _sparkLife[i] = 0.30 + Math.random() * 0.16; made++;
-            }
-        }
-        function _sparkUpdate(dt) {
-            if (!_sparkPts) return;
-            const grav = 55 * K; let any = false;
-            for (let i = 0; i < _SPARK_N; i++) {
-                if (_sparkLife[i] <= 0) continue;
-                const j = i * 3;
-                _sparkLife[i] -= dt;
-                if (_sparkLife[i] <= 0) { _sparkCol[j] = _sparkCol[j + 1] = _sparkCol[j + 2] = 0; continue; }
-                any = true;
-                _sparkVel[j + 1] -= grav * dt;
-                _sparkPos[j] += _sparkVel[j] * dt; _sparkPos[j + 1] += _sparkVel[j + 1] * dt; _sparkPos[j + 2] += _sparkVel[j + 2] * dt;
-                const fade = 1 - Math.min(1, dt * 3.2);
-                _sparkCol[j] *= fade; _sparkCol[j + 1] *= fade; _sparkCol[j + 2] *= fade;
-            }
-            _sparkPts.geometry.attributes.position.needsUpdate = true;
-            _sparkPts.geometry.attributes.color.needsUpdate = true;
-            _sparkPts.visible = any;
-        }
-        // #4 Bloom: lazy-load the vendored postprocessing addons and build an
-        // EffectComposer (RenderPass -> UnrealBloomPass -> OutputPass/ACES). Returns
-        // the composer once ready, or null (caller falls back to a direct render).
-        function _bloomEnsure() {
-            if (_composer) return _composer;
-            if (_bloomLoad || !ren || !scene || !cam) return null;
-            const A = '/static/vendor/three/addons/';
-            _bloomLoad = Promise.all([
-                import(A + 'postprocessing/EffectComposer.js'),
-                import(A + 'postprocessing/RenderPass.js'),
-                import(A + 'postprocessing/UnrealBloomPass.js'),
-                import(A + 'postprocessing/OutputPass.js'),
-            ]).then(([EC, RP, UB, OP]) => {
-                try {
-                    const sz = canvasSize(highwayCanvas) || { w: 1280, h: 720 };
-                    const w = Math.max(2, sz.w | 0), h = Math.max(2, sz.h | 0);
-                    // Multisampled (WebGL2 MSAA) HalfFloat target so anti-aliasing
-                    // survives the bloom path — EffectComposer's default target has no
-                    // `samples`, which is why bloom-on looked jagged (worst on non-Retina
-                    // DPR1 displays that have no supersampling cushion).
-                    const _bloomRT = new T.WebGLRenderTarget(w, h, { type: T.HalfFloatType, samples: 4 });
-                    const comp = new EC.EffectComposer(ren, _bloomRT);
-                    comp.addPass(new RP.RenderPass(scene, cam));
-                    _bloomPass = new UB.UnrealBloomPass(new T.Vector2(w, h), 0.65, 0.5, 0.82); // strength, radius, threshold (high → only emissive blooms)
-                    comp.addPass(_bloomPass);
-                    comp.addPass(new OP.OutputPass());
-                    comp.setSize(w, h);
-                    _bloomW = w; _bloomH = h; _composer = comp;
-                } catch (e) { console.warn('[3D-Hwy] bloom init failed', e); _composer = null; }
-            }).catch((e) => console.warn('[3D-Hwy] bloom modules failed', e));
-            return null;
-        }
+        /* ── h3d-carve-8: Q-helpers (lighting/FX) → src/fx.js ─────────── */
+        /* buildBoard deferred: see plans/highway3d-carve.md §3 row 16.  */
+        const { _h3dHexOrDefault, _applyCinematic, _timingHex, _sparkBurst, _sparkUpdate, _bloomEnsure } = createFx({
+            BG_DEFAULTS, K,
+            getT: () => T,
+            getAmbLight: () => ambLight, getDirLight: () => dirLight, getCinematic: () => _cinematic,
+            getTimingFx: () => _timingFx,
+            getSparkPts: () => _sparkPts, setSparkPts: (v) => { _sparkPts = v; }, getSparkN: () => _SPARK_N,
+            getSparkPos: () => _sparkPos, setSparkPos: (v) => { _sparkPos = v; },
+            getSparkVel: () => _sparkVel, setSparkVel: (v) => { _sparkVel = v; },
+            getSparkCol: () => _sparkCol, setSparkCol: (v) => { _sparkCol = v; },
+            getSparkLife: () => _sparkLife, setSparkLife: (v) => { _sparkLife = v; },
+            getComposer: () => _composer, setComposer: (v) => { _composer = v; },
+            getBloomLoad: () => _bloomLoad, setBloomLoad: (v) => { _bloomLoad = v; },
+            getBloomPass: () => _bloomPass, setBloomPass: (v) => { _bloomPass = v; },
+            getBloomW: () => _bloomW, setBloomW: (v) => { _bloomW = v; },
+            getBloomH: () => _bloomH, setBloomH: (v) => { _bloomH = v; },
+            getRen: () => ren, getScene: () => scene, getCam: () => cam, getHighwayCanvas: () => highwayCanvas,
+            canvasSize,
+        });
         function buildBoard() {
             // Dispose before clearing (traverse: nut/headstock may live in a Group).
             while (fretG.children.length) {

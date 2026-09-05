@@ -120,6 +120,15 @@ function loadHighway3dStatics() {
             drawToneHud() { return 0; },
             drawLyrics() { return 0; },
         }),
+        // h3d-carve-8: Q-helpers (lighting/FX) moved to src/fx.js.
+        createFx: () => ({
+            _h3dHexOrDefault() { return 0; },
+            _applyCinematic() {},
+            _timingHex() { return 0x22ff88; },
+            _sparkBurst() {},
+            _sparkUpdate() {},
+            _bloomEnsure() { return null; },
+        }),
     };
     vm.createContext(sandbox);
     vm.runInContext(instrumented, sandbox, { filename: SCREEN_JS });
