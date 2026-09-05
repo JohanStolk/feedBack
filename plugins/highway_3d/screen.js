@@ -7,6 +7,7 @@
 // changes.
 
 import { geoFretX, dZ, slideTrailEnd, camBaseDistU, camLowFretPullbackU, computeBPM, _makeGaussTex, RENDER_ORDER_LAYER_STACK, RENDER_ORDER_LAYER_INDEX, RENDER_ORDER_AT_Z_ZERO, RENDER_ORDER_FAR_CLAMP, renderOrderForLayerAtZ, _noteKey, lowerBoundT, hwyFirstRelevantFrettedTime, geoFretMid } from './src/geometry.js'; // h3d-carve-1b
+import { loadThree, T } from './src/three-loader.js'; // h3d-carve-2
 
 (function () {
     'use strict';
@@ -1479,26 +1480,8 @@ import { geoFretX, dZ, slideTrailEnd, camBaseDistU, camLowFretPullbackU, compute
 
     // computeBPM, _makeGaussTex — moved to src/geometry.js (h3d-carve-1).
 
-    /* ======================================================================
-     *  Three.js module — lazily loaded, memoized
-     * ====================================================================== */
-
-    let T = null;
-    let threeLoadPromise = null;
-    function loadThree() {
-        if (!threeLoadPromise) {
-            threeLoadPromise = import(THREE_URL)
-                .then(mod => { T = mod; return mod; })
-                .catch(() => import(THREE_CDN)
-                    .then(mod => { T = mod; return mod; })
-                    .catch(e => {
-                        console.error('[3D-Hwy] Three.js load failed:', e);
-                        threeLoadPromise = null;
-                        throw e;
-                    }));
-        }
-        return threeLoadPromise;
-    }
+    // T, loadThree — moved to src/three-loader.js (h3d-carve-2).
+    // T is a live-binding export; the IIFE reads the updated value after loadThree() resolves.
 
     /* ======================================================================
      *  Splitscreen helpers

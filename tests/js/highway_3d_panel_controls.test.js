@@ -28,10 +28,10 @@ function loadHighway3dStatics() {
         1,
         'expected exactly one factory-registration anchor in screen.js',
     );
-    // Since h3d-carve-1 screen.js starts with an ES module import statement.
-    // vm.runInContext does not support static import — strip the import line
-    // and provide stub implementations of the geometry exports in the sandbox.
-    const stripped = src.replace(/^import\s+\{[^}]+\}\s+from\s+['"][^'"]+['"];\s*\/\/[^\n]*\n/m, '');
+    // Since h3d-carve-1 screen.js starts with ES module import statements.
+    // vm.runInContext does not support static import — strip all leading import
+    // lines and provide stub implementations of the exports in the sandbox.
+    const stripped = src.replace(/^(import\s+\{[^}]+\}\s+from\s+['"][^'"]+['"];\s*\/\/[^\n]*\n)+/m, '');
     const instrumented = stripped.replace(
         ANCHOR,
         `${ANCHOR}\n    window.__h3dTestExports = { BG_DEFAULTS };`,
@@ -72,6 +72,9 @@ function loadHighway3dStatics() {
         lowerBoundT: () => 0,
         hwyFirstRelevantFrettedTime: () => null,
         geoFretMid: (f, _uniform) => f * 0.1,
+        // h3d-carve-2: T and loadThree moved to src/three-loader.js.
+        T: null,
+        loadThree: () => Promise.resolve(),
     };
     vm.createContext(sandbox);
     vm.runInContext(instrumented, sandbox, { filename: SCREEN_JS });
