@@ -209,19 +209,16 @@ test('all DI values are defined before the createBgControl call in screen.js', (
     assert.ok(venueIdx      < bgCallIdx, '_venueSceneOverride must be defined before createBgControl call');
 });
 
-// ── 13. Generic stranded-caller: _pc* returned symbols in screen.js destructure ─
+// ── 13. Stranded-caller: every returned symbol must be in screen.js destructure ─
 
 test('every _pc* symbol returned by createBgControl is in the screen.js destructure', () => {
-    // Adapted from bc-panel.js test 12 for the factory pattern.
-    // For a factory module, the stranded-caller class is: a symbol that appears
-    // in the `return { ... }` of createBgControl but is NOT in the `const { ... }
-    // = createBgControl(...)` destructure in screen.js — meaning the symbol is
-    // exported at runtime but screen.js never binds it, so any IIFE caller of
-    // that symbol hits ReferenceError (or the undefined stub from a stale
-    // function-scope redeclaration).
+    // For a factory module the stranded-caller class is: a symbol in the factory's
+    // `return { ... }` that is NOT in the screen.js `const { ... } = createBgControl(...)`
+    // destructure — the factory vends it but screen.js never binds it, so any IIFE
+    // code that tries to call it hits ReferenceError.
     //
-    // Mutation: add `_pcNewFn` to bg-control.js return but not to screen.js
-    // destructure → leaked is non-empty → test RED.
+    // Mutation: add `_pcNewFn` to bg-control.js return {...} but not to screen.js
+    // destructure → leaked = ['_pcNewFn'] → RED.
     const bgSrc  = src();
     const scrSrc = screenSrc();
 
@@ -239,15 +236,53 @@ test('every _pc* symbol returned by createBgControl is in the screen.js destruct
         destructureMatch[1].split(',').map(s => s.trim().replace(/^(\w+)\s*:.*$/, '$1')).filter(Boolean)
     );
 
-    // Strip import lines and line comments from IIFE body to avoid false positives.
-    const noImports  = scrSrc.replace(/^import\s+.*\n/gm, '');
-    const noComments = noImports.replace(/\/\/[^\n]*/g, '');
-
-    // Returned symbols referenced in the IIFE body but absent from the destructure.
-    const leaked = [...returned].filter(
-        sym => new RegExp('\\b' + sym + '\\b').test(noComments) && !destructured.has(sym)
-    );
+    // Every returned symbol must be bound by the destructure (return ⊆ destructure).
+    const leaked = [...returned].filter(sym => !destructured.has(sym));
     assert.deepStrictEqual(leaked, [],
-        'screen.js references createBgControl return symbols not in its destructure: ' +
+        'createBgControl returns symbols not bound by screen.js destructure: ' +
         leaked.join(', '));
+});
+
+// ── 14. Stale-private guard: no private bg-control.js symbol bare in screen.js ─
+
+test('no private bg-control.js symbol appears bare in screen.js IIFE body', () => {
+    // The cut-4 stale-private-reference class: a function or variable from a moved
+    // module that still appears as a bare name in screen.js (not via the destructure,
+    // not inside an import line, not inside a comment). If bg-control.js is re-merged
+    // or a caller copy-pastes `_pcSync(...)` into screen.js, this test goes RED.
+    //
+    // Mutation: add `_pcSync()` somewhere in screen.js IIFE body (outside the
+    // createBgControl destructure line) → stale = ['_pcSync'] → RED.
+    const bgSrc  = src();
+    const scrSrc = screenSrc();
+
+    // All _pc* symbols defined in bg-control.js (functions, lets, consts).
+    const defined = new Set(
+        [...bgSrc.matchAll(/\bfunction\s+(_pc\w+)|(?:let|const)\s+(_pc\w+)/g)]
+            .map(m => m[1] || m[2])
+    );
+
+    // Public symbols (in the destructure) are legitimately referenced in screen.js.
+    const destructureMatch = scrSrc.match(/const\s*\{\s*([^}]+)\}\s*=\s*createBgControl\s*\(/);
+    assert.ok(destructureMatch, 'screen.js must destructure the createBgControl result');
+    const destructured = new Set(
+        destructureMatch[1].split(',').map(s => s.trim().replace(/^(\w+)\s*:.*$/, '$1')).filter(Boolean)
+    );
+    const privateSymbols = [...defined].filter(sym => !destructured.has(sym));
+
+    // Strip imports, block comments (tombstone), line comments, and the destructure
+    // statement itself so the bound symbols don't fire false positives.
+    const noImports       = scrSrc.replace(/^import\s+.*\n/gm, '');
+    const noBlockComments = noImports.replace(/\/\*[\s\S]*?\*\//g, '');
+    const noLineComments  = noBlockComments.replace(/\/\/[^\n]*/g, '');
+    const noDestructure   = noLineComments.replace(
+        /const\s*\{[^}]+\}\s*=\s*createBgControl\s*\([^)]*\)\s*;/, '',
+    );
+
+    const stale = privateSymbols.filter(
+        sym => new RegExp('\\b' + sym + '\\b').test(noDestructure),
+    );
+    assert.deepStrictEqual(stale, [],
+        'screen.js contains bare references to private bg-control.js symbols: ' +
+        stale.join(', '));
 });
