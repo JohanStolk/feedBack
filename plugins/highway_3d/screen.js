@@ -3301,14 +3301,9 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
         // Per-frame booleans: handShapes[i] passes inferArpeggioFromNotePattern
         // once (see fillArpeggioGhostInferFlags) so the note loop skips O(hs×notes)
         // rescans — ref fillArpeggioGhostInferFlags in update().
-        let _arpGhostHsInferScratch = [];
         // Handshape start-times where ghost fret numbers show but [ ] brackets are suppressed
         // (synth-chord onset-match cases — not genuine arpeggios).
-        let _arpSynthOnsetHsSet = new Set();
         /** Per-frame: ``handShapeIsArpeggioForLaneRail`` baked once — lane slices were O(96 × hs × infer). */
-        let _arpLaneRailHsScratch = [];
-        let _arpRailBoundLoScratch = [];
-        let _arpRailBoundHiScratch = [];
 
         // ── Cross-frame caches for chart-static derivations ──────────────
         // The merge + arp-flag fills below depend only on chart-static
@@ -3319,9 +3314,6 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
         // arrangements this avoids per-frame Set construction, nested
         // O(hs × notes) scans, and a sort — significant FPS recovery.
         let _mergeCacheResult = null;
-        let _mergeCacheChordsRef = null;
-        let _mergeCacheHsRef = null;
-        let _mergeCacheTplRef = null;
 
         // Fret connector-label visibility cache: tracks which (time, fret)
         // pairs may show their indicator number per the measure-skip rule
@@ -3339,9 +3331,6 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
         // (arpeggio chords, synthetic chords) never produce stacked duplicate labels.
         const _frameLabeledKeys = new Set();
 
-        let _arpGhostInferRefHs = null;
-        let _arpGhostInferRefNotes = null;
-        let _arpGhostInferRefTpl = null;
 
         // Slide-target gem suppression. A Set of "t_s" keys for notes in
         // bundle.notes that are the linkNext destination of a preceding note
@@ -3351,13 +3340,7 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
         let _slideTargetNotesRef = null;
         let _slideTargetChordsRef = null;
 
-        let _laneRailFlagsRefHs = null;
-        let _laneRailFlagsRefTpl = null;
 
-        let _laneRailBoundsRefHs = null;
-        let _laneRailBoundsRefChords = null;
-        let _laneRailBoundsRefTpl = null;
-        let _laneRailBoundsRefNotes = null;
         let _lastHwW = 0, _lastHwH = 0;
         // Frame counter for throttling the CSS-box drift check in draw()
         // (getBoundingClientRect is a forced layout read; see the comment
@@ -3587,8 +3570,6 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
         // ``time * 1e4`` keeps a 0.1 ms resolution — more than enough
         // to disambiguate distinct chord onsets — and stays under the
         // safe-integer limit for any realistic song length.
-        const _CV_KEY_TIME_MUL = 1e4;
-        const _CV_KEY_TIME_SLOT = 1e6;
         function _encodeChordVerdictKey(ch) {
             const tSlot = Math.round(ch.t * _CV_KEY_TIME_MUL) * _CV_KEY_TIME_SLOT;
             const idSlot = ch.id != null ? ((Number(ch.id) | 0) + 1) : 0;
@@ -3622,7 +3603,7 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
         let _susVerdictLatch = new Map();
 
         /* ── h3d-carve-10: K-section (score FX) → src/score-fx.js ──────── */
-        const { fxInit, fxTeardown, fxSpawnPop: _fxSpawnPop, drawScoreFx } = createScoreFx({
+        const { fxInit, fxTeardown, fxSpawnPop: _fxSpawnPop, drawScoreFx, fxClearSeen } = createScoreFx({
             getHighwayCanvas: () => highwayCanvas,
             getNdFrameNowMs:  () => _ndFrameNowMs,
             getCam:           () => cam,
@@ -3647,15 +3628,7 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
         // an anchor (the common case) collapse into the same entry. Held as
         // four parallel arrays so the per-frame work allocates nothing once
         // the buffers reach their steady-state size.
-        const _laneSegDMin = [];
-        const _laneSegDMax = [];
-        const _laneSegZ0 = [];
-        const _laneSegZ1 = [];
         /** Chart-time span per merged lane segment (for per-slice arpeggio rail tint). */
-        const _laneSegTLo = [];
-        const _laneSegTHi = [];
-        const _laneSegArp = [];
-        let _laneSegLen = 0;
         let pChordBox, pChordFrameFill, pChordLbl, pBarreLine, pArpBracket, pPMXFill, pFHXFill;
         let gPMXFill = null; // shared geometry for PM X fill — disposed in teardown
         let gFHXFill = null; // shared geometry for FH X fill — disposed in teardown
@@ -3805,9 +3778,6 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
         // Holding these at closure scope keeps them in a GC root; the engine can
         // keep them hot in L1/L2 across frames, and no allocation pressure from
         // update() itself.
-        const _scrStringSustain      = new Array(MAX_RENDER_STRINGS).fill(false);
-        const _scrStringAnticipation = new Array(MAX_RENDER_STRINGS).fill(0);
-        const _scrFretHeat           = new Array(NFRETS + 1).fill(0);
         // Fret-wire hit flash. _fwHitIn is per-frame (cleared with the rest of
         // the frame state, written by drawNote when a provider confirms a note);
         // _fwHitGlow persists across frames so the flash can decay smoothly
@@ -3823,20 +3793,13 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
         let _fwHitPrevTime = -Infinity; // chart time of the last decay step
         let _fwHitColor = null;         // T.Color scratch (built in initScene)
         let _fwHitEmissive = null;
-        const _scrStrGlow            = new Array(MAX_RENDER_STRINGS).fill(0.5);
-        const _scrAccentFillBoost    = new Array(MAX_RENDER_STRINGS).fill(0);
-        const _scrNextNoteByString   = new Array(MAX_RENDER_STRINGS).fill(null);
-        const _scrLastFretForString  = new Array(MAX_RENDER_STRINGS).fill(undefined);
         // Scratch buffer for the recent-past-event prepass (~0.6 s back) — avoids
         // re-allocating a per-string Array every frame. Re-filled with -Infinity
         // at the top of each prepass run.
-        const _scrRecentByString     = new Array(MAX_RENDER_STRINGS).fill(-Infinity);
         // Scratch buffers for the ghost-preview gap prepass — refilled each
         // frame to avoid the `new Array(nStr)` + `Object.create(null)` churn.
         // The Map is cleared at the top of the prepass; live entries are
         // consumed by drawNote() reads later in the same frame.
-        const _scrGhostLastT         = new Array(MAX_RENDER_STRINGS).fill(-Infinity);
-        const _scrGhostPrevBuf       = new Map();
         // Per-string count of upcoming-ghost slots (1/2) claimed so far this
         // frame (board ghost — up to 3 simultaneous previews per string).
         // Reset to 0 each frame alongside the other pool .reset() calls.
@@ -3847,25 +3810,18 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
         // already drawn brackets in the AHEAD note-stream pass. Cleared at the
         // top of every chord pass so the Set objects (and the outer Map) are
         // reused across frames instead of reallocated.
-        const _scrNoteStreamBracketStrings = new Map();
         // Scratch object reused for chord-note drawNote calls so `{ ...cn, t: ch.t }`
         // doesn't allocate a new object per chord note per frame.
-        const _scrChordNote = {};
         // Scratch objects for the nextNoteByString prepass — chord notes need
         // a merged `{ ...cn, t: ch.t }` object, but spread allocates every frame.
         // One scratch object per string (max MAX_RENDER_STRINGS) is safe because:
         // (a) the prepass writes each string's entry at most once per frame,
         // (b) drawNote() reads nxFrame.t before the next frame's prepass can overwrite.
-        const _scrNextNoteByStringData = Array.from({ length: MAX_RENDER_STRINGS }, () => ({}));
         // Reusable Set for arpeggio persistence key lookup — cleared each frame
         // instead of reallocating a new Set.
-        const _scrArpPersistKeys = new Set();
         // Reusable Set for active-fret cooldown tracking — cleared each frame.
-        const _scrActiveFrets = new Set();
         // Reusable scratch for barre atMinFretStrings computation — avoids the
         // [...chShape].filter().map().sort() chain (3 allocations per chord per frame).
-        const _scrAtMinFretArr = new Array(MAX_RENDER_STRINGS).fill(0);
-        let _scrAtMinFretLen = 0;
         // Sorted scalar view of "next event time per string ∪ recent event
         // time per string" — populated once per frame in update() after
         // _drawNextByString and _drawRecentByString are set. drawNote() and
@@ -7004,6 +6960,84 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
             setClkPerf:            (v) => { _clkPerf            = v; },
             setClkRate:            (v) => { _clkRate            = v; },
             setFrameNow:           (v) => { _frameNow           = v; },
+            // ── Category B — plain consts ──────────────────────────────────────
+            ACCENT_NOTE_FILL_BOOST, ACCENT_NOTE_LINGER_EPS, ACCENT_NOTE_STR_GLOW,
+            ARPEGGIO_RIM_BLUE_HEX, ARP_FRAME_ONSET_CLUSTER_S, ARP_FRAME_ONSET_PAD_S,
+            ARP_INFER_MIN_HAND_SHAPE_SPAN_S,
+            CAM_DIST_HYST_C, CAM_DIST_HYST_T, CAM_TGT_AHEAD_C, CAM_TGT_AHEAD_T,
+            CAM_TGT_HYST_C, CAM_TGT_HYST_T, CAM_TGT_TAU_C, CAM_TGT_TAU_T,
+            CHORD_BOX_EDGE_ALPHA, CHORD_BOX_HIT_BRIGHT_HEX, CHORD_BOX_MISS_DARK_HEX, CHORD_BOX_TEAL_HEX,
+            CHORD_FRAME_RIM_Z_MIN, CHORD_FRAME_RIM_Z_SCAL,
+            CHORD_HWY_FADE_S, CHORD_HWY_LINGER_S,
+            DIAG_CROSSFADE_S, DIAG_ENTRANCE_S, DIAG_LINGER_S, DOTS,
+            FRET_COOLDOWN, FRET_EMISSIVE,
+            FRET_WIRE_ACTIVE_HEX, FRET_WIRE_ACTIVE_OP, FRET_WIRE_HIT_DECAY, FRET_WIRE_HIT_INTENSITY,
+            FRET_WIRE_HIT_OP, FRET_WIRE_IDLE_HEX, FRET_WIRE_IDLE_OP,
+            HWY_LANE_STRIPE_OP_BASE, HWY_LANE_STRIPE_OP_INT, HWY_LANE_TIME_SLICES,
+            NEXT_ON_STRING_T_EPS, _ND_UNMATCHED_LATCH_AFTER, VENUE_LANE_OP_BOOST,
+            MAX_RENDER_STRINGS,
+            // ── Category C — fn-refs / let-vars ────────────────────────────────
+            activePalette, anchorLaneBoundsAt, anchorPlayedFretSpanAt,
+            boardSpanX, chordShapeSignature,
+            _drawAnchors, _drawChordTemplates, _drawNextByString, _drawRecentByString, _drawTeachingMarks,
+            _encodeChordVerdictKey, _firstEventTimeGreaterThan,
+            fretColumnMarkerCadence, fretColumnMarkersForAnchor, fretDividersVisible,
+            fretLastActiveTime, _fretMarkerWaveCache, fretWireMats, fretX,
+            getChartAnchorAt, hwyPostHitTailFadeMul,
+            imFHTech, imFHXFill, imFHXLines, imPMTech, imPMXFill, imPMXLines,
+            laneBoundsFromAnchor, sectionLabelsOnHighway, _showFingerHints, updateStringHighlights,
+            _noteKey,
+            bendChevronMat, darkenHex, slideArrowMat, triMat,
+            palmMuteXSpriteMat, fretHandMuteXSpriteMat,
+            fxClearSeen,
+            // ── Category D — Three.js render objects (reassigned) ───────────────
+            getRen:          () => ren,
+            getScene:        () => scene,
+            getCam:          () => cam,
+            // ── Category E — shared mutable state (getter/setter) ───────────────
+            getDiagChord:            () => _diagChord,
+            setDiagChord:            (v) => { _diagChord            = v; },
+            getDiagEntranceT:        () => _diagEntranceT,
+            setDiagEntranceT:        (v) => { _diagEntranceT        = v; },
+            getDiagLastKey:          () => _diagLastKey,
+            setDiagLastKey:          (v) => { _diagLastKey          = v; },
+            getDiagPrev:             () => _diagPrev,
+            setDiagPrev:             (v) => { _diagPrev             = v; },
+            getDiagPrevOpacity:      () => _diagPrevOpacity,
+            setDiagPrevOpacity:      (v) => { _diagPrevOpacity      = v; },
+            getDiagPrevStartOpacity: () => _diagPrevStartOpacity,
+            setDiagPrevStartOpacity: (v) => { _diagPrevStartOpacity = v; },
+            getDiagPrevStartT:       () => _diagPrevStartT,
+            setDiagPrevStartT:       (v) => { _diagPrevStartT       = v; },
+            getMergeCacheResult:     () => _mergeCacheResult,
+            setMergeCacheResult:     (v) => { _mergeCacheResult     = v; },
+            _scrEventTimes,
+            getScrEventTimesLen:     () => _scrEventTimesLen,
+            setScrEventTimesLen:     (v) => { _scrEventTimesLen     = v; },
+            getSlideTargetChordsRef: () => _slideTargetChordsRef,
+            setSlideTargetChordsRef: (v) => { _slideTargetChordsRef = v; },
+            getSlideTargetNotesRef:  () => _slideTargetNotesRef,
+            setSlideTargetNotesRef:  (v) => { _slideTargetNotesRef  = v; },
+            getSlideTargetSet:       () => _slideTargetSet,
+            setSlideTargetSet:       (v) => { _slideTargetSet       = v; },
+            // ── Category F — shared mutable (stable refs + getters) ─────────────
+            _fwChordAcc, _fwHitGlow, _fwHitIn, _rimFlashIn, _susVerdictLatch,
+            getFwHitColor:           () => _fwHitColor,
+            getFwHitEmissive:        () => _fwHitEmissive,
+            getFwHitPrevTime:        () => _fwHitPrevTime,
+            setFwHitPrevTime:        (v) => { _fwHitPrevTime        = v; },
+            getMBeatM:               () => mBeatM,
+            getMBeatQ:               () => mBeatQ,
+            getMRimFlash:            () => mRimFlash,
+            // ── Category G — lane materials (reassigned) ─────────────────────────
+            getMLaneDivider:         () => mLaneDivider,
+            getMLaneDividerArp:      () => mLaneDividerArp,
+            getMLaneDividerExt:      () => mLaneDividerExt,
+            getMLaneEven:            () => mLaneEven,
+            getMLaneOdd:             () => mLaneOdd,
+            // ── Extra ──────────────────────────────────────────────────────────
+            getChordFrameGradTex:    () => chordFrameGradTex,
+            getChordFrameGradTexArp: () => chordFrameGradTexArp,
         });
 
 

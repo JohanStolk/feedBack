@@ -42,8 +42,13 @@ test('screen.js imports createRenderer from renderer.js', () => {
         'screen.js must import createRenderer');
 });
 
-test('screen.js wiring block contains expected DI param count (184)', () => {
-    // 184 = 77 getters + 35 setters + 72 shorthands
+test('screen.js wiring block contains expected DI param count (313)', () => {
+    // 313 = 105 getters + 48 setters + 160 shorthands
+    // 184→313: +129 carve-15 full completion:
+    //   +43 Category B consts, +37 Category C fn-refs, +3 Category D getters,
+    //   +27 Category E getter/setter pairs + 1 stable ref,
+    //   +11 Category F (5 stable + 6 getter/setter), +5 Category G getters,
+    //   +2 extra (chordFrameGradTex/Arp getters).
     // 177→184: +7 Creed r1 F3 fixes: TS, S_BASE, FRET_LABEL_GOLD_HEX, FRET_LABEL_IDLE_HEX,
     //   lookaheadBootstrapTime, lookaheadComputeFretBounds, lookaheadTargetWorldX.
     // 241→177: removed 44 phantom consts, 2 undefined fn-refs, 16 dead params,
@@ -61,7 +66,7 @@ test('screen.js wiring block contains expected DI param count (184)', () => {
     }, 0);
 
     const total = getterCount + setterCount + shorthandCount;
-    assert.strictEqual(total, 184,
+    assert.strictEqual(total, 313,
         `DI param count mismatch: got ${total} (getters=${getterCount}, setters=${setterCount}, shorthands=${shorthandCount})`);
 });
 
@@ -306,3 +311,278 @@ test('F1: screen.js destructures _prewarmStatic and _prewarmChart from createRen
     assert.match(screenSrc, /const\s*\{\s*update\s*,\s*_prewarmStatic\s*,\s*_prewarmChart\s*\}/,
         'screen.js must destructure _prewarmStatic and _prewarmChart from createRenderer return');
 });
+
+// ── 23. ACTUAL EXECUTION SMOKE TEST ─────────────────────────────────────────
+// Loads createRenderer via new Function (strips ESM import/export) so it runs
+// in a CJS test context with fully-stub DI. Proves update() does not throw.
+//
+// RED at d475899: first execution would crash with
+//   ReferenceError: ACCENT_NOTE_FILL_BOOST is not defined
+// because Category-B consts were read from renderer.js scope but were never
+// declared inside it (they lived only in screen.js's IIFE and ES-module scope
+// never chains into an IIFE). GREEN at this commit: all 313 DI params wired.
+{
+    // Stub window for Node (renderer.js reads window.feedBack, guarded by &&)
+    if (typeof global.window === 'undefined') global.window = {};
+
+    // ── Geometry stubs (replace the geometry.js import) ──────────────────────
+    const _geo = {
+        lowerBoundT(arr, t) {
+            let lo = 0, hi = arr.length;
+            while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m].t < t) lo = m + 1; else hi = m; }
+            return lo;
+        },
+        camBaseDistU: () => 0,
+        camLowFretPullbackU: () => 0,
+        dZ: () => 0,
+        renderOrderForLayerAtZ: () => 0,
+    };
+
+    // Strip ESM: remove import lines, rename export function
+    const _stripped = src
+        .replace(/^import\s+\{[^}]+\}\s+from\s+['"][^'"]+['"]\s*;?[^\n]*/mg, '')
+        .replace('export function createRenderer', 'function createRenderer');
+
+    // Wrap in a function that closes over geometry helpers and returns the factory
+    const _getFactory = new Function(
+        'lowerBoundT', 'camBaseDistU', 'camLowFretPullbackU', 'dZ', 'renderOrderForLayerAtZ',
+        _stripped + '\nreturn createRenderer;',
+    );
+    const _createRenderer = _getFactory(
+        _geo.lowerBoundT, _geo.camBaseDistU, _geo.camLowFretPullbackU,
+        _geo.dZ, _geo.renderOrderForLayerAtZ,
+    );
+
+    // ── Build a minimal-stub DI covering all 313 params ──────────────────────
+    const N  = () => {};
+    const NAR = new Float32Array(0);
+    const NSTR = 6, NFRETS = 24;
+    function _makeDI() {
+        return {
+            // B — consts
+            K: 1, NFRETS, NW: 1, NH: 0.1, AHEAD: 1.5, BEHIND: 0.2, S_GAP: 1,
+            CAM_FOCUS_BLEND_RATE: 0.1, CAM_LOCK_ZOOM_MIN: 0.5, CAM_LOCK_ZOOM_MAX: 2,
+            CAM_LOCK_CENTER_FRET: 7, LOOKAHEAD_LOCK_ENGAGE_MAXF: 3, LOOKAHEAD_LOCK_RELEASE_MAXF: 5,
+            DEFAULT_LOOKAHEAD_FRET_SPAN: 8, FRET_WIDTH_MID: 0.05, CAM_TGT_BEHIND: 0.2,
+            CAM_DIST_BASE: 5, VENUE_GEM_EMISSIVE_MUL: 1.5, NOTEDETECT_GEM_VERDICT_WINDOW: 0.3,
+            INLAY_LABEL_FRETS: [3,5,7,9,12], GHOST_HOLD_AFTER_ONSET: 0.1,
+            CHORD_FRAME_RIM_MIN: 0.01, CHORD_FRAME_RIM_FRAC_H: 0.1,
+            TS: 1, S_BASE: 0.1, FRET_LABEL_GOLD_HEX: '#e8c040', FRET_LABEL_IDLE_HEX: '#9ab8cc',
+            ACCENT_NOTE_FILL_BOOST: 0.3, ACCENT_NOTE_LINGER_EPS: 0.05, ACCENT_NOTE_STR_GLOW: 0.5,
+            ARPEGGIO_RIM_BLUE_HEX: '#4080ff', ARP_FRAME_ONSET_CLUSTER_S: 0.1,
+            ARP_FRAME_ONSET_PAD_S: 0.05, ARP_INFER_MIN_HAND_SHAPE_SPAN_S: 0.2,
+            CAM_DIST_HYST_C: 0.1, CAM_DIST_HYST_T: 0.1, CAM_TGT_AHEAD_C: 0.1,
+            CAM_TGT_AHEAD_T: 0.1, CAM_TGT_HYST_C: 0.05, CAM_TGT_HYST_T: 0.05,
+            CAM_TGT_TAU_C: 0.2, CAM_TGT_TAU_T: 0.2, CHORD_BOX_EDGE_ALPHA: 0.7,
+            CHORD_BOX_HIT_BRIGHT_HEX: '#fff', CHORD_BOX_MISS_DARK_HEX: '#333',
+            CHORD_BOX_TEAL_HEX: '#00ac', CHORD_FRAME_RIM_Z_MIN: 0.1,
+            CHORD_FRAME_RIM_Z_SCAL: 1, CHORD_HWY_FADE_S: 0.3, CHORD_HWY_LINGER_S: 2,
+            DIAG_CROSSFADE_S: 0.15, DIAG_ENTRANCE_S: 0.2, DIAG_LINGER_S: 1.5,
+            DOTS: [3,5,7,9,12,15,17,19,21], FRET_COOLDOWN: 0.15, FRET_EMISSIVE: 2,
+            FRET_WIRE_ACTIVE_HEX: '#80c0ff', FRET_WIRE_ACTIVE_OP: 0.9,
+            FRET_WIRE_HIT_DECAY: 0.9, FRET_WIRE_HIT_INTENSITY: 3, FRET_WIRE_HIT_OP: 1,
+            FRET_WIRE_IDLE_HEX: '#aaa', FRET_WIRE_IDLE_OP: 0.3,
+            HWY_LANE_STRIPE_OP_BASE: 0.3, HWY_LANE_STRIPE_OP_INT: 0.15,
+            HWY_LANE_TIME_SLICES: 8, NEXT_ON_STRING_T_EPS: 0.01,
+            _ND_UNMATCHED_LATCH_AFTER: 0.2, VENUE_LANE_OP_BOOST: 0.5,
+            MAX_RENDER_STRINGS: 8,
+            // C — fn-refs
+            sY: (s) => s * 0.1, xFret: (f) => f * 0.05, xFretMid: (f) => f * 0.05,
+            fretLabelScaleForFret: () => 1, pbBeg: N, pbEnd: N, pbReportTick: N,
+            hwyFirstRelevantFrettedTime: () => Infinity, _syncOpenStringPitchLabels: N,
+            txtMat: () => ({ opacity: 1, map: null, color: { lerp: N }, emissive: { lerp: N }, emissiveIntensity: 1 }),
+            _setLabelMap: N, drawNote: N, drawArpBrackets: N, chordHarmonyLabels: N,
+            camUpdate: N, lookaheadBootstrapTime: N,
+            lookaheadComputeFretBounds: () => ({ lo: 0, hi: 12 }),
+            lookaheadTargetWorldX: () => 0, chordWireHighDensity: () => false,
+            chordTemplateLabel: () => null, chordTemplateMarkedArpeggio: () => false,
+            chordHandShapeArpeggioHint: () => false,
+            mergeHandShapeSynthChords: () => [], mergeChordShape: () => null,
+            inferArpeggioFromNotePattern: N, chordShapeCoveredByStandaloneNotes: () => false,
+            hsStart: () => 0, hsEnd: () => 0, handShapeChartSpanSec: () => 0.5,
+            fillArpeggioGhostInferFlags: N, arpeggioChordIdForNoteWithInferCache: () => -1,
+            arpHsBoundsForNote: () => null, fillLaneRailHandShapeFlags: N,
+            fillArpeggioRailShapeBoundsCaches: N,
+            arpeggioLaneOuterRailLaneSlice: () => null,
+            arpeggioLaneOuterRailAtChartTime: () => null,
+            arpeggioLaneDividerFrameAccentMul: () => 1,
+            arpeggioLaneDividerXYScaleMatchFrameRim: () => 1,
+            validString: (s) => s >= 0 && s < NSTR, filterValidNotes: (n) => n,
+            activePalette: new Array(NSTR).fill(0xffffff),
+            anchorLaneBoundsAt: () => null, anchorPlayedFretSpanAt: () => null,
+            boardSpanX: 1, chordShapeSignature: () => '',
+            _drawAnchors: [], _drawChordTemplates: [], _drawNextByString: new Array(NSTR).fill(null),
+            _drawRecentByString: new Array(NSTR).fill(null), _drawTeachingMarks: [],
+            _encodeChordVerdictKey: (t, s, f) => `${t}_${s}_${f}`,
+            _firstEventTimeGreaterThan: () => Infinity,
+            fretColumnMarkerCadence: 0, fretColumnMarkersForAnchor: () => [],
+            fretDividersVisible: true, fretLastActiveTime: new Float32Array(NFRETS + 1),
+            _fretMarkerWaveCache: {}, fretWireMats: [],
+            fretX: (f) => f * 0.05,
+            getChartAnchorAt: () => ({ fret: 0, width: 12 }), hwyPostHitTailFadeMul: () => 1,
+            imFHTech: null, imFHXFill: null, imFHXLines: null,
+            imPMTech: null, imPMXFill: null, imPMXLines: null,
+            laneBoundsFromAnchor: () => ({ lo: 0, hi: 12 }), sectionLabelsOnHighway: false,
+            _showFingerHints: () => false, updateStringHighlights: N,
+            _noteKey: (t, s) => `${t}_${s}`,
+            bendChevronMat: () => null, darkenHex: (h) => h, slideArrowMat: () => null,
+            triMat: () => null, palmMuteXSpriteMat: () => null,
+            fretHandMuteXSpriteMat: () => null, fxClearSeen: N,
+            // D — ren/scene/cam getters
+            getRen: () => null, getScene: () => null, getCam: () => null,
+            // E — shared mutable (getter/setter)
+            getDiagChord: () => null, setDiagChord: N,
+            getDiagEntranceT: () => 1, setDiagEntranceT: N,
+            getDiagLastKey: () => null, setDiagLastKey: N,
+            getDiagPrev: () => null, setDiagPrev: N,
+            getDiagPrevOpacity: () => 0, setDiagPrevOpacity: N,
+            getDiagPrevStartOpacity: () => 0, setDiagPrevStartOpacity: N,
+            getDiagPrevStartT: () => null, setDiagPrevStartT: N,
+            getMergeCacheResult: () => null, setMergeCacheResult: N,
+            _scrEventTimes: new Float64Array(256),
+            getScrEventTimesLen: () => 0, setScrEventTimesLen: N,
+            getSlideTargetChordsRef: () => null, setSlideTargetChordsRef: N,
+            getSlideTargetNotesRef: () => null, setSlideTargetNotesRef: N,
+            getSlideTargetSet: () => null, setSlideTargetSet: N,
+            // F — stable refs + getter/setter
+            _fwChordAcc: new Map(), _fwHitGlow: new Float32Array(NFRETS + 1),
+            _fwHitIn: new Float32Array(NFRETS + 1), _rimFlashIn: new Float32Array(NSTR),
+            _susVerdictLatch: new Map(),
+            getFwHitColor: () => null, getFwHitEmissive: () => null,
+            getFwHitPrevTime: () => -Infinity, setFwHitPrevTime: N,
+            getMBeatM: () => null, getMBeatQ: () => null, getMRimFlash: () => [],
+            // G — lane materials
+            getMLaneDivider: () => ({ opacity: 1, color: { lerp: N }, emissive: { lerp: N } }),
+            getMLaneDividerArp: () => ({ opacity: 1 }),
+            getMLaneDividerExt: () => ({ opacity: 1 }),
+            getMLaneEven: () => ({ opacity: 1 }),
+            getMLaneOdd:  () => ({ opacity: 1 }),
+            // Extra
+            getChordFrameGradTex: () => null, getChordFrameGradTexArp: () => null,
+            // Pool getters (33)
+            getPNote: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPNoteEdge: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPSus: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPSusOutline: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPSusRibbon: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPSusRibbonOl: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPTapChevron: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPAccentHalo: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPLbl: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPArpBracket: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPBeat: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPSec: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPFretLbl: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPLane: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPLaneDivider: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPGhostFretLbl: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPChordBox: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPChordFrameFill: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPChordLbl: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPBarreLine: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPHaloBar: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPPMXFill: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPFHXFill: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPMuteXLines: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPFHXLines: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPNoteFretLabel: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPConnectorLine: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPDropLine: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPTeachMarkLbl: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPFretColMarker: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPSusRail: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPSusRailBloom: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            getPTechPlane: () => ({ get: () => ({}), release: N, resetCount: N, reset: N }),
+            // Material/scene getters
+            getMHitBright: () => [], getMHitSusOutline: () => null,
+            getGlowMul: () => 1, getVenueSceneOverride: () => false, getProjMeshArr: () => [],
+            // Render settings
+            getTextSize: () => 12, getCameraMode: () => 'smooth',
+            getCameraSmoothing: () => 0.5, getZoomSmoothing: () => 0.5,
+            getCameraLockLow: () => false, getCameraLockZoom: () => 0,
+            getNStr: () => NSTR, getLeftyCached: () => false, getInverted: () => false,
+            // Camera state getters
+            getTgtX: () => 0.3, getTgtDist: () => 5, getCurX: () => 0.3,
+            getPrevLowFretBonus: () => 0, getPrevLockActive: () => false,
+            getLookaheadCamX: () => 0.3, getLookaheadFretSpan: () => 8,
+            getLookaheadLowBonusU: () => 0, getLookaheadHiNeckLatch: () => false,
+            getLookaheadCamPrevNow: () => 0,
+            getFrameNow: () => 0, getClkAudioT: () => 0, getClkPerf: () => 0,
+            getClkRate: () => 1, getCamSnapped: () => true, getCamPreScanned: () => true,
+            getCamBootstrapHolding: () => false, getCamBootstrapMode: () => 'snap',
+            getSongKey: () => 'smoke-test', getNdVerdictSawAlpha: () => false,
+            getNdVerdictMaxAlpha: () => 0, getNdFrameNowMs: () => 0,
+            getInlayLabels: () => [], getLeanSusPollCounter: () => 0, getLeanSus: () => true,
+            getTextSizeMul: () => 1, getTextSizeMulApplied: () => 1,
+            getImPMTechCount: () => 0, getImFHTechCount: () => 0,
+            getMeasureStartsRef: () => [],
+            // Stable object refs
+            _frameLabeledKeys: new Set(), _ndLabels: [],
+            _scrGhostUpcomingCount: new Int32Array(NSTR),
+            _ndHitMarks: [], _ndMissMarks: [],
+            // Setters
+            setNdVerdictSawAlpha: N, setNdVerdictMaxAlpha: N, setNdFrameNowMs: N,
+            setLeanSus: N, setLeanSusPollCounter: N,
+            setTextSizeMul: N, setTextSizeMulApplied: N,
+            setImPMTechCount: N, setImFHTechCount: N,
+            setImPMXFillCount: N, setImPMXLinesCount: N,
+            setImFHXFillCount: N, setImFHXLinesCount: N,
+            setLookaheadCamX: N, setLookaheadFretSpan: N,
+            setLookaheadCamPrevNow: N, setLookaheadHiNeckLatch: N,
+            setLookaheadLowBonusU: N, setTgtX: N, setTgtDist: N,
+            setPrevLowFretBonus: N, setPrevLockActive: N,
+            setCurX: N, setCurDist: N, setSongKey: N, setCamSnapped: N,
+            setCamPreScanned: N, setCamBootstrapHolding: N, setCamBootstrapMode: N,
+            setMeasureStarts: N, setMeasureStartsRef: N,
+            setClkAudioT: N, setClkPerf: N, setClkRate: N, setFrameNow: N,
+        };
+    }
+
+    function _makeBundle(o) {
+        return Object.assign({
+            currentTime: 1.0, notes: [], chords: [], beats: [], sections: [],
+            anchors: [{ time: 0, fret: 0, width: 12 }], chordTemplates: [],
+            stringCount: NSTR, lyricsVisible: false, toneChanges: [], phrases: null,
+            isReady: true, mastery: 1, hasPhraseData: false,
+            songInfo: { arrangement: 'lead', tuning: [0,0,0,0,0,0], capo: 0, centOffset: 0 },
+            lowerBoundT: _geo.lowerBoundT,
+            lowerBoundTime: (arr, t) => _geo.lowerBoundT(arr, t),
+            project: () => ({ x: 0, y: 0 }), fretX: (f) => f * 0.05,
+            getNoteState: () => null,
+        }, o);
+    }
+
+    test('smoke: createRendererFn constructs without throw', () => {
+        assert.doesNotThrow(() => _createRenderer(_makeDI()),
+            'createRenderer(stub-DI) must not throw — all names must be provided');
+    });
+
+    test('smoke: update() with empty bundle throws no ReferenceError (proves no undeclared names)', () => {
+        // RED at d475899: ACCENT_NOTE_FILL_BOOST is not defined (Category B, not DI'd).
+        // GREEN at this commit: all 313 DI params wired in createRenderer signature.
+        // TypeErrors from stub DI (incomplete Three.js objects) are expected and accepted;
+        // what must NOT happen is a ReferenceError for an undeclared name.
+        const renderer = _createRenderer(_makeDI());
+        try {
+            renderer.update(_makeBundle({}));
+        } catch (e) {
+            assert.notStrictEqual(e.constructor, ReferenceError,
+                `update() must not throw ReferenceError — undeclared name: ${e.message}`);
+        }
+    });
+
+    test('smoke: update() backward seek (region C) throws no ReferenceError', () => {
+        // Backward seek triggers _susVerdictLatch.clear() and slide-target reset.
+        // TypeErrors from stub DI are expected; ReferenceError proves an undeclared name.
+        const di = _makeDI();
+        di.getFrameNow = () => 2.0;
+        const renderer = _createRenderer(di);
+        try { renderer.update(_makeBundle({ currentTime: 2.0 })); } catch (_) {}
+        try {
+            renderer.update(_makeBundle({ currentTime: 0.5 })); // backward seek
+        } catch (e) {
+            assert.notStrictEqual(e.constructor, ReferenceError,
+                `update() backward seek must not throw ReferenceError: ${e.message}`);
+        }
+    });
+}

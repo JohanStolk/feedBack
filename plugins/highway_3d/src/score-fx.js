@@ -292,5 +292,6 @@ export function createScoreFx({ getHighwayCanvas, getNdFrameNowMs, getCam, getPr
             _fxRingMs = _fxBreakMs = -1e9;
         }
 
-    return { fxInit, fxTeardown, fxSpawnPop: _fxSpawnPop, drawScoreFx };
+    function fxClearSeen() { _fxSeen.clear(); }
+    return { fxInit, fxTeardown, fxSpawnPop: _fxSpawnPop, drawScoreFx, fxClearSeen };
 }

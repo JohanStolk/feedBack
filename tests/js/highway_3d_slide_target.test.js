@@ -29,7 +29,7 @@ test('a _slideTargetSet pre-pass builds the suppressed-gem set from bundle.notes
     );
     assert.match(
         src,
-        /if\s*\(\s*stSet\.size\s*>\s*0\s*\)\s*_slideTargetSet\s*=\s*stSet/,
+        /if\s*\(\s*stSet\.size\s*>\s*0\s*\)\s*(?:_slideTargetSet\s*=\s*stSet|setSlideTargetSet\s*\(\s*stSet\s*\))/,
         '_slideTargetSet must be assigned from the pre-pass result',
     );
 });
@@ -38,7 +38,7 @@ test('_isSlideTgt is derived from _slideTargetSet membership', () => {
     const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + _noteSrc + '\n' + fs.readFileSync(RENDERER_JS, 'utf8');
     assert.match(
         src,
-        /_isSlideTgt\s*=\s*!!\(\s*_slideTargetSet\s*&&\s*_slideTargetSet\.has\(/,
+        /_isSlideTgt\s*=\s*!!\(\s*(?:_slideTargetSet|getSlideTargetSet\(\))\s*&&\s*(?:_slideTargetSet|getSlideTargetSet\(\))\.has\(/,
         '_isSlideTgt must test _slideTargetSet membership',
     );
 });

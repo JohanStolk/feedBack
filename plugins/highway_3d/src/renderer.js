@@ -92,12 +92,111 @@ export function createRenderer({
     setCamBootstrapHolding, setCamBootstrapMode,
     setMeasureStarts, setMeasureStartsRef,
     setClkAudioT, setClkPerf, setClkRate, setFrameNow,
+    // ── Category B — plain consts ─────────────────────────────────────────
+    ACCENT_NOTE_FILL_BOOST, ACCENT_NOTE_LINGER_EPS, ACCENT_NOTE_STR_GLOW,
+    ARPEGGIO_RIM_BLUE_HEX, ARP_FRAME_ONSET_CLUSTER_S, ARP_FRAME_ONSET_PAD_S,
+    ARP_INFER_MIN_HAND_SHAPE_SPAN_S,
+    CAM_DIST_HYST_C, CAM_DIST_HYST_T, CAM_TGT_AHEAD_C, CAM_TGT_AHEAD_T,
+    CAM_TGT_HYST_C, CAM_TGT_HYST_T, CAM_TGT_TAU_C, CAM_TGT_TAU_T,
+    CHORD_BOX_EDGE_ALPHA, CHORD_BOX_HIT_BRIGHT_HEX, CHORD_BOX_MISS_DARK_HEX, CHORD_BOX_TEAL_HEX,
+    CHORD_FRAME_RIM_Z_MIN, CHORD_FRAME_RIM_Z_SCAL,
+    CHORD_HWY_FADE_S, CHORD_HWY_LINGER_S,
+    DIAG_CROSSFADE_S, DIAG_ENTRANCE_S, DIAG_LINGER_S, DOTS,
+    FRET_COOLDOWN, FRET_EMISSIVE,
+    FRET_WIRE_ACTIVE_HEX, FRET_WIRE_ACTIVE_OP, FRET_WIRE_HIT_DECAY, FRET_WIRE_HIT_INTENSITY,
+    FRET_WIRE_HIT_OP, FRET_WIRE_IDLE_HEX, FRET_WIRE_IDLE_OP,
+    HWY_LANE_STRIPE_OP_BASE, HWY_LANE_STRIPE_OP_INT, HWY_LANE_TIME_SLICES,
+    NEXT_ON_STRING_T_EPS, _ND_UNMATCHED_LATCH_AFTER, VENUE_LANE_OP_BOOST,
+    MAX_RENDER_STRINGS,
+    // ── Category C — fn-refs / let-vars ──────────────────────────────────
+    activePalette, anchorLaneBoundsAt, anchorPlayedFretSpanAt,
+    boardSpanX, chordShapeSignature,
+    _drawAnchors, _drawChordTemplates, _drawNextByString, _drawRecentByString, _drawTeachingMarks,
+    _encodeChordVerdictKey, _firstEventTimeGreaterThan,
+    fretColumnMarkerCadence, fretColumnMarkersForAnchor, fretDividersVisible,
+    fretLastActiveTime, _fretMarkerWaveCache, fretWireMats, fretX,
+    getChartAnchorAt, hwyPostHitTailFadeMul,
+    imFHTech, imFHXFill, imFHXLines, imPMTech, imPMXFill, imPMXLines,
+    laneBoundsFromAnchor, sectionLabelsOnHighway, _showFingerHints, updateStringHighlights,
+    _noteKey,
+    bendChevronMat, darkenHex, slideArrowMat, triMat,
+    palmMuteXSpriteMat, fretHandMuteXSpriteMat,
+    fxClearSeen,
+    // ── Category D — Three.js render objects (reassigned) ─────────────────
+    getRen, getScene, getCam,
+    // ── Category E — shared mutable state (getter/setter) ─────────────────
+    getDiagChord, setDiagChord,
+    getDiagEntranceT, setDiagEntranceT,
+    getDiagLastKey, setDiagLastKey,
+    getDiagPrev, setDiagPrev,
+    getDiagPrevOpacity, setDiagPrevOpacity,
+    getDiagPrevStartOpacity, setDiagPrevStartOpacity,
+    getDiagPrevStartT, setDiagPrevStartT,
+    getMergeCacheResult, setMergeCacheResult,
+    _scrEventTimes,
+    getScrEventTimesLen, setScrEventTimesLen,
+    getSlideTargetChordsRef, setSlideTargetChordsRef,
+    getSlideTargetNotesRef, setSlideTargetNotesRef,
+    getSlideTargetSet, setSlideTargetSet,
+    // ── Category F — shared mutable (stable refs + getters) ───────────────
+    _fwChordAcc, _fwHitGlow, _fwHitIn, _rimFlashIn, _susVerdictLatch,
+    getFwHitColor, getFwHitEmissive,
+    getFwHitPrevTime, setFwHitPrevTime,
+    getMBeatM, getMBeatQ, getMRimFlash,
+    // ── Category G — lane materials (reassigned) ──────────────────────────
+    getMLaneDivider, getMLaneDividerArp, getMLaneDividerExt, getMLaneEven, getMLaneOdd,
+    // ── Extra ─────────────────────────────────────────────────────────────
+    getChordFrameGradTex, getChordFrameGradTexArp,
 }) {
     // Per-renderer mutable state (not DI — persists across update() calls):
     let _chordVerdicts = new Map();
     let _chordVerdictsLastNow = null;
     let _fretLabelNotesRef = null;
     let _fretLabelAllowed = null;
+    let _arpGhostHsInferScratch = [];
+    let _arpGhostInferRefHs = null;
+    let _arpGhostInferRefNotes = null;
+    let _arpGhostInferRefTpl = null;
+    let _arpLaneRailHsScratch = [];
+    let _arpRailBoundHiScratch = [];
+    let _arpRailBoundLoScratch = [];
+    let _arpSynthOnsetHsSet = new Set();
+    let _laneRailBoundsRefChords = null;
+    let _laneRailBoundsRefHs = null;
+    let _laneRailBoundsRefNotes = null;
+    let _laneRailBoundsRefTpl = null;
+    let _laneRailFlagsRefHs = null;
+    let _laneRailFlagsRefTpl = null;
+    const _laneSegArp = [];
+    const _laneSegDMax = [];
+    const _laneSegDMin = [];
+    let _laneSegLen = 0;
+    const _laneSegTHi = [];
+    const _laneSegTLo = [];
+    const _laneSegZ0 = [];
+    const _laneSegZ1 = [];
+    let _mergeCacheChordsRef = null;
+    let _mergeCacheHsRef = null;
+    let _mergeCacheTplRef = null;
+    const _scrAccentFillBoost    = new Array(MAX_RENDER_STRINGS).fill(0);
+    const _scrActiveFrets = new Set();
+    const _scrArpPersistKeys = new Set();
+    const _scrAtMinFretArr = new Array(MAX_RENDER_STRINGS).fill(0);
+    let _scrAtMinFretLen = 0;
+    const _scrChordNote = {};
+    const _scrFretHeat           = new Array(NFRETS + 1).fill(0);
+    const _scrGhostLastT         = new Array(MAX_RENDER_STRINGS).fill(-Infinity);
+    const _scrGhostPrevBuf       = new Map();
+    const _scrLastFretForString  = new Array(MAX_RENDER_STRINGS).fill(undefined);
+    const _scrNextNoteByString   = new Array(MAX_RENDER_STRINGS).fill(null);
+    const _scrNextNoteByStringData = Array.from({ length: MAX_RENDER_STRINGS }, () => ({}));
+    const _scrNoteStreamBracketStrings = new Map();
+    const _scrRecentByString     = new Array(MAX_RENDER_STRINGS).fill(-Infinity);
+    const _scrStrGlow            = new Array(MAX_RENDER_STRINGS).fill(0.5);
+    const _scrStringAnticipation = new Array(MAX_RENDER_STRINGS).fill(0);
+    const _scrStringSustain      = new Array(MAX_RENDER_STRINGS).fill(false);
+    const _CV_KEY_TIME_MUL = 1e4;
+    const _CV_KEY_TIME_SLOT = 1e6;
 
 function lookaheadSmoothCamStep(dtSec, tgtXWorld, tgtSpanInt) {
     const d = Math.min(0.2, Math.max(1e-4, dtSec));
@@ -320,9 +419,10 @@ function smoothNow(bundle) {
 
 let _chartPrewarmed = false;
 function _prewarmTex(mat) {
-    if (mat && mat.map && ren) ren.initTexture(mat.map);
+    if (mat && mat.map && getRen()) getRen().initTexture(mat.map);
 }
 function _prewarmStatic() {
+    const nStr = getNStr();
     // MAINTENANCE NOTE: this list must cover every deterministic
     // (chart-independent) material/texture the per-frame paths can
     // request lazily. Adding a new label style or sprite factory to
@@ -331,7 +431,7 @@ function _prewarmStatic() {
     // mid-song. Chart-dependent labels (chord names, section names)
     // live in _prewarmChart.
     try {
-        if (ren && scene && cam) ren.compile(scene, cam);
+        if (getRen() && getScene() && getCam()) getRen().compile(getScene(), getCam());
     } catch (e) { console.warn('[3D-Hwy] prewarm compile:', e); }
     try {
         // Fret-number labels in the per-frame style/colour combos.
@@ -586,7 +686,7 @@ function update(bundle) {
         // Score-pop dedup too: a practice loop / rewind re-judges
         // the same popKeys, and the wall-time TTL alone would
         // suppress their fresh "+N" pops for up to 4 s.
-        _fxSeen.clear();
+        fxClearSeen();
     }
     if (_ndHasProvider && _chordVerdicts.size > 0) {
         if (_chordVerdictsLastNow !== null && now < _chordVerdictsLastNow - 0.25) {
@@ -605,18 +705,18 @@ function update(bundle) {
     // Skip the merge when inputs are identity-equal to the last
     // frame's; mergeHandShapeSynthChords is chart-static.
     let chords;
-    if (_mergeCacheResult !== null
+    if (getMergeCacheResult() !== null
         && _mergeCacheChordsRef === bundle.chords
         && _mergeCacheHsRef === bundle.handShapes
         && _mergeCacheTplRef === bundle.chordTemplates) {
-        chords = _mergeCacheResult;
+        chords = getMergeCacheResult();
     } else {
         chords = mergeHandShapeSynthChords(
             bundle.chords,
             bundle.handShapes,
             bundle.chordTemplates,
         );
-        _mergeCacheResult = chords;
+        setMergeCacheResult(chords);
         _mergeCacheChordsRef = bundle.chords;
         _mergeCacheHsRef = bundle.handShapes;
         _mergeCacheTplRef = bundle.chordTemplates;
@@ -687,8 +787,8 @@ function update(bundle) {
     //   Case 2 — same fret (hold), destination has sl/slu (hold→slide)
     //
     // Sources can be single notes OR chord notes (bundle.chords).
-    if (notes !== _slideTargetNotesRef || bundle.chords !== _slideTargetChordsRef) {
-        _slideTargetSet = null;
+    if (notes !== getSlideTargetNotesRef() || bundle.chords !== getSlideTargetChordsRef()) {
+        setSlideTargetSet(null);
         if (notes && notes.length) {
             const stSet = new Set();
             const checkSrc = (srcT, srcS, srcF, srcSus, srcSl) => {
@@ -725,10 +825,10 @@ function update(bundle) {
                     }
                 }
             }
-            if (stSet.size > 0) _slideTargetSet = stSet;
+            if (stSet.size > 0) setSlideTargetSet(stSet);
         }
-        _slideTargetNotesRef = notes;
-        _slideTargetChordsRef = bundle.chords;
+        setSlideTargetNotesRef(notes);
+        setSlideTargetChordsRef(bundle.chords);
     }
 
     /** Arpeggio lane purple rails — authored-marker cache + bounds cache. */
@@ -1037,18 +1137,18 @@ function update(bundle) {
     // Pulls directly from _drawNextByString / _drawRecentByString
     // (closure-scoped, populated just above) so we're independent of
     // the recent-event prepass's inner-block ``_recArr`` alias.
-    _scrEventTimesLen = 0;
+    setScrEventTimesLen(0);
     for (let s = 0; s < nStr; s++) {
         const nf = _drawNextByString[s];
         if (nf) {
             const tn = nf.t;
-            if (Number.isFinite(tn)) _scrEventTimes[_scrEventTimesLen++] = tn;
+            if (Number.isFinite(tn)) { const _etl = getScrEventTimesLen(); _scrEventTimes[_etl] = tn; setScrEventTimesLen(_etl + 1); }
         }
         const rt = _drawRecentByString[s];
-        if (Number.isFinite(rt)) _scrEventTimes[_scrEventTimesLen++] = rt;
+        if (Number.isFinite(rt)) { const _etl = getScrEventTimesLen(); _scrEventTimes[_etl] = rt; setScrEventTimesLen(_etl + 1); }
     }
-    if (_scrEventTimesLen > 1) {
-        _scrEventTimes.subarray(0, _scrEventTimesLen).sort();
+    if (getScrEventTimesLen() > 1) {
+        _scrEventTimes.subarray(0, getScrEventTimesLen()).sort();
     }
 
     // ── Ghost preview gap prepass ──────────────────────────────────
@@ -1445,7 +1545,7 @@ function update(bundle) {
             // Suppress the gem for linkNext slide-target notes (skipBody=true).
             // The sustain/slide trail still renders because it now lives outside
             // the !skipBody gate in drawNote().
-            const _isSlideTgt = !!(_slideTargetSet && _slideTargetSet.has(_noteKey(n.t, n.s)));
+            const _isSlideTgt = !!(getSlideTargetSet() && getSlideTargetSet().has(_noteKey(n.t, n.s)));
             // Always show the fret label — suppressing it for repeated frets on the same
             // string caused the label to be invisible throughout the note's flight and
             // only appear moments before being played (when the previous note's linger
@@ -2330,7 +2430,7 @@ function update(bundle) {
                 // Swapping `map` between two non-null gradient textures
                 // doesn't change shader-defining state, so no needsUpdate
                 // — that flag would otherwise force a recompile per frame.
-                fill.material.map = isArpeggioFrame ? chordFrameGradTexArp : chordFrameGradTex;
+                fill.material.map = isArpeggioFrame ? getChordFrameGradTexArp() : getChordFrameGradTex();
                 fill.material.color.setRGB(1, 1, 1);
 
                 const withTopFrame = !isRepeat;
@@ -2792,7 +2892,7 @@ function update(bundle) {
     // frame-rate independent and honours playback speed. Seeking
     // backward resets it — otherwise a flash from a hit we jumped away
     // from would linger on the wire.
-    if (fretWireMats.length && _fwHitColor) {
+    if (fretWireMats.length && getFwHitColor()) {
         // Resolve accumulated chord hits: a chord's flash frames the
         // LANE, not its own shape. The lit lane strip spans the anchor's
         // width (min ~4 frets), which can run a fret past the chord's
@@ -2819,12 +2919,12 @@ function update(bundle) {
             if (_fwA > _fwHitIn[_w1]) _fwHitIn[_w1] = _fwA;
         }
 
-        const _fwDt = now - _fwHitPrevTime;
+        const _fwDt = now - getFwHitPrevTime();
         if (!(_fwDt >= 0) || _fwDt > 1) _fwHitGlow.fill(0); // first frame, seek, or long stall
         const _fwDecay = (_fwDt > 0 && _fwDt <= 1)
             ? Math.exp(-_fwDt / FRET_WIRE_HIT_DECAY)
             : 0;
-        _fwHitPrevTime = now;
+        setFwHitPrevTime(now);
         // Decay EVERY wire's glow state, but flash only the OUTERMOST
         // pair of lit wires. Fast passages overlap their decay tails, so
         // without this a run of consecutive notes lights a picket fence
@@ -2849,8 +2949,8 @@ function update(bundle) {
             const _g = _fwHitGlow[_f];
             const _m = fretWireMats[_f];
             if (!_m) continue;
-            _m.color.lerp(_fwHitColor, _g);
-            _m.emissive.lerp(_fwHitEmissive, _g);
+            _m.color.lerp(getFwHitColor(), _g);
+            _m.emissive.lerp(getFwHitEmissive(), _g);
             _m.emissiveIntensity = 1 + (FRET_WIRE_HIT_INTENSITY - 1) * _g;
             _m.opacity += (FRET_WIRE_HIT_OP - _m.opacity) * _g;
         }
@@ -2860,8 +2960,8 @@ function update(bundle) {
         // is only ever ASSIGNED while the provider confirms the note,
         // and the provider's alpha already fades; when it goes silent
         // the outline reverts and idle intensity is irrelevant.
-        for (let _s = 0; _s < mRimFlash.length; _s++) {
-            const _m = mRimFlash[_s];
+        for (let _s = 0; _s < getMRimFlash().length; _s++) {
+            const _m = getMRimFlash()[_s];
             if (_m) _m.emissiveIntensity = 1 + (FRET_WIRE_HIT_INTENSITY - 1) * _rimFlashIn[_s];
         }
     }
@@ -2952,8 +3052,8 @@ function update(bundle) {
                     * (_venueSceneOverride ? VENUE_LANE_OP_BOOST : 1);
                 // 2 shared materials (odd/even); opacity travels via the
                 // material so set it once per frame, not per mesh.
-                mLaneOdd.opacity = laneOp;
-                mLaneEven.opacity = laneOp;
+                getMLaneOdd().opacity = laneOp;
+                getMLaneEven().opacity = laneOp;
                 for (let s = 0; s < _laneSegLen; s++) {
                     const segZ0 = _laneSegZ0[s];
                     const segZ1 = _laneSegZ1[s];
@@ -2969,7 +3069,7 @@ function update(bundle) {
                         lane.rotation.x = -Math.PI / 2;
                         lane.scale.set(laneW, stripLen, 1);
                         const odd = ((f - fLow) & 1) === 0;
-                        lane.material = odd ? mLaneOdd : mLaneEven;
+                        lane.material = odd ? getMLaneOdd() : getMLaneEven();
                         lane.renderOrder = 1;
                     }
                 }
@@ -2978,8 +3078,8 @@ function update(bundle) {
             {
                 const yPos = boardY + 0.03 * K;
                 const divOpArp = Math.min(0.92, 0.16 + highwayIntensity * 0.42);
-                if (mLaneDividerArp) {
-                    mLaneDividerArp.opacity = divOpArp;
+                if (getMLaneDividerArp()) {
+                    getMLaneDividerArp().opacity = divOpArp;
                 }
 
                 for (let s = 0; s < _laneSegLen; s++) {
@@ -2995,7 +3095,7 @@ function update(bundle) {
                         if (_laneSegArp[s] && (f === fDiv0 || f === fDiv1)) continue;
                         const div = pLaneDivider.get();
                         div.position.set(xFret(f), yPos, zMid);
-                        div.material = mLaneDivider;
+                        div.material = getMLaneDivider();
                         div.scale.set(1, 1, dz);
                         div.renderOrder = 2;
                     }
@@ -3021,7 +3121,7 @@ function update(bundle) {
                     for (const xf of [fL, fR]) {
                         const div = pLaneDivider.get();
                         div.position.set(xFret(xf), yPos, zArpMid);
-                        div.material = mLaneDividerArp;
+                        div.material = getMLaneDividerArp();
                         div.scale.set(arpSSeg, arpSSeg, arpRailLen);
                         div.renderOrder = 2;
                     }
@@ -3069,8 +3169,8 @@ function update(bundle) {
             const zLane = -laneLen / 2;
             const laneOp = (HWY_LANE_STRIPE_OP_BASE + highwayIntensity * HWY_LANE_STRIPE_OP_INT)
                 * (_venueSceneOverride ? VENUE_LANE_OP_BOOST : 1);
-            mLaneOdd.opacity = laneOp;
-            mLaneEven.opacity = laneOp;
+            getMLaneOdd().opacity = laneOp;
+            getMLaneEven().opacity = laneOp;
             const fLow = dMin + 1;
             const fHi = dMax;
             for (let f = fLow; f <= fHi; f++) {
@@ -3081,7 +3181,7 @@ function update(bundle) {
                 lane.rotation.x = -Math.PI / 2;
                 lane.scale.set(laneWStrip, laneLen, 1);
                 const odd = ((f - fLow) & 1) === 0;
-                lane.material = odd ? mLaneOdd : mLaneEven;
+                lane.material = odd ? getMLaneOdd() : getMLaneEven();
                 lane.renderOrder = 1;
             }
 
@@ -3091,9 +3191,9 @@ function update(bundle) {
                 const yPos = boardY + 0.03 * K;
                 const divOp2 = 0.02 + highwayIntensity * 0.1;
                 const divOpArp2 = Math.min(0.92, 0.16 + highwayIntensity * 0.42);
-                if (mLaneDivider && mLaneDividerArp) {
-                    mLaneDivider.opacity = divOp2;
-                    mLaneDividerArp.opacity = divOpArp2;
+                if (getMLaneDivider() && getMLaneDividerArp()) {
+                    getMLaneDivider().opacity = divOp2;
+                    getMLaneDividerArp().opacity = divOpArp2;
                 }
                 const fDivA = Math.floor(divMin);
                 const fDivB = Math.ceil(divMax);
@@ -3101,7 +3201,7 @@ function update(bundle) {
                     if (hwyLaneArpOuterDividers && (f === fDivA || f === fDivB)) continue;
                     const div = pLaneDivider.get();
                     div.position.set(xFret(f), yPos, -divLen * 0.5);
-                    div.material = mLaneDivider;
+                    div.material = getMLaneDivider();
                     div.scale.set(1, 1, divLen);
                     div.renderOrder = 2;
                 }
@@ -3109,7 +3209,7 @@ function update(bundle) {
                     for (const xf of [fDivA, fDivB]) {
                         const div = pLaneDivider.get();
                         div.position.set(xFret(xf), yPos, zLane);
-                        div.material = mLaneDividerArp;
+                        div.material = getMLaneDividerArp();
                         div.scale.set(arpLaneS, arpLaneS, laneLen);
                         div.renderOrder = 2;
                     }
@@ -3118,17 +3218,17 @@ function update(bundle) {
         }
 
         // ── Fret boundary extension lines ─────────────────────────
-        if (mLaneDividerExt && fretDividersVisible) {
+        if (getMLaneDividerExt() && fretDividersVisible) {
             // Same hit-line stop as the lane (#991) — otherwise these lines
             // would be the only floor geometry still running past it.
             const extLaneLen = TS * AHEAD;
             const extZMid = -extLaneLen / 2;
             const extYPos = boardY + 0.03 * K;
-            mLaneDividerExt.opacity = Math.max(0.3, 0.3 + highwayIntensity * 0.15);
+            getMLaneDividerExt().opacity = Math.max(0.3, 0.3 + highwayIntensity * 0.15);
             for (let f = 0; f <= NFRETS; f++) {
                 const div = pLaneDivider.get();
                 div.position.set(xFret(f), extYPos, extZMid);
-                div.material = mLaneDividerExt;
+                div.material = getMLaneDividerExt();
                 div.scale.set(1, 1, extLaneLen);
                 div.renderOrder = 2;
             }
@@ -3188,7 +3288,7 @@ function update(bundle) {
             const meas = b.measure !== lastM; lastM = b.measure;
             if (b.time < t0 || b.time > t1) continue;
             const bl2 = pBeat.get();
-            bl2.material = meas ? mBeatM : mBeatQ;
+            bl2.material = meas ? getMBeatM() : getMBeatQ();
             bl2.scale.set(bw2, 1, 1);
             bl2.position.set(board.min - 2 * K, S_BASE - NH / 2 - 1.5 * K, dZ(b.time - now));
         }
@@ -3458,12 +3558,12 @@ function update(bundle) {
         // Include frets in the key so two templates sharing a display name but
         // differing in fingering each trigger a fresh crossfade/entrance.
         const newKey = newChord ? newChord.name + '|' + newChord.frets.join(',') : null;
-        if (newKey !== _diagLastKey) {
-            if (_diagChord && newKey !== null) {
+        if (newKey !== getDiagLastKey()) {
+            if (getDiagChord() && newKey !== null) {
                 // Recompute outgoing alpha from stored event time rather than the
                 // stale per-frame chDt; after dropped frames or seeks this prevents
                 // the overlay jumping to a stale brightness before the crossfade.
-                const freshChDt = _diagChord.t !== undefined ? _diagChord.t - now : _diagChord.chDt;
+                const freshChDt = getDiagChord().t !== undefined ? getDiagChord().t - now : getDiagChord().chDt;
                 const prevOpacity = Math.max(0, Math.min(1, 1 + freshChDt / DIAG_LINGER_S));
                 // Only crossfade when the outgoing chord is actually visible at now.
                 // freshChDt > 0 means the old chord is in the future (backward seek
@@ -3476,10 +3576,10 @@ function update(bundle) {
                     // Use the string count the outgoing chord was captured with, not the
                     // current nStr — an arrangement switch during a 150 ms crossfade
                     // must not remap the outgoing diagram onto the new layout.
-                    _diagPrev = { name: _diagChord.name, frets: _diagChord.frets, nStr: _diagChord.nStr ?? nStr, t: _diagChord.t0 ?? _diagChord.t ?? now };
-                    _diagPrevStartOpacity = prevOpacity;
-                    _diagPrevOpacity = prevOpacity;
-                    _diagPrevStartT = now;
+                    setDiagPrev({ name: getDiagChord().name, frets: getDiagChord().frets, nStr: getDiagChord().nStr ?? nStr, t: getDiagChord().t0 ?? getDiagChord().t ?? now });
+                    setDiagPrevStartOpacity(prevOpacity);
+                    setDiagPrevOpacity(prevOpacity);
+                    setDiagPrevStartT(now);
                     // entranceT for the outgoing diagram is computed live from _diagPrev.t
                     // each frame (see draw path), so it rewinds correctly on backward seeks
                     // within the crossfade window — no separate snapped state needed here.
@@ -3518,41 +3618,41 @@ function update(bundle) {
                         // a chord that was mostly faded from appearing brighter on a seek.
                         const histStartOpacity = Math.max(0, Math.min(1,
                             1 - (newChord.t - histPrev.t) / DIAG_LINGER_S));
-                        _diagPrev = histPrev;
-                        _diagPrevStartOpacity = histStartOpacity;
-                        _diagPrevOpacity = Math.max(0, histStartOpacity * (1 - elapsed / DIAG_CROSSFADE_S));
-                        _diagPrevStartT = newChord.t;
+                        setDiagPrev(histPrev);
+                        setDiagPrevStartOpacity(histStartOpacity);
+                        setDiagPrevOpacity(Math.max(0, getDiagPrevStartOpacity() * (1 - elapsed / DIAG_CROSSFADE_S)));
+                        setDiagPrevStartT(newChord.t);
                     } else {
-                        _diagPrev = null; _diagPrevOpacity = 0; _diagPrevStartOpacity = 0;
-                        _diagPrevStartT = null;
+                        setDiagPrev(null); setDiagPrevOpacity(0); setDiagPrevStartOpacity(0);
+                        setDiagPrevStartT(null);
                     }
                 } else {
                     // prevOpacity <= 0: old chord already fully faded, no crossfade needed.
-                    _diagPrev = null; _diagPrevOpacity = 0; _diagPrevStartOpacity = 0;
-                    _diagPrevStartT = null;
+                    setDiagPrev(null); setDiagPrevOpacity(0); setDiagPrevStartOpacity(0);
+                    setDiagPrevStartT(null);
                 }
             } else {
-                _diagPrev = null; _diagPrevOpacity = 0; _diagPrevStartOpacity = 0;
-                _diagPrevStartT = null;
+                setDiagPrev(null); setDiagPrevOpacity(0); setDiagPrevStartOpacity(0);
+                setDiagPrevStartT(null);
             }
-            _diagLastKey = newKey;
+            setDiagLastKey(newKey);
             // Only update _diagChord when the chord key actually changes so that a
             // lingering chord's original nStr is preserved on subsequent frames.
             // (newChord is rebuilt every frame with the live nStr; unconditionally
             // assigning here would stomp the captured nStr if the arrangement switches
             // while the same chord is still in its linger window.)
-            _diagChord = newChord;
-        } else if (newKey !== null && newChord && _diagChord) {
+            setDiagChord(newChord);
+        } else if (newKey !== null && newChord && getDiagChord()) {
             // Same chord re-seen. Update linger expiry (t) when the event time changes.
             // Forward restrum (newChord.t > _diagChord.t): extend the linger window
             // but preserve t0 so the entrance animation is NOT replayed — avoids the
             // overlay jumping back to its 0.85× scale on every strum of the same chord.
             // Backward seek to earlier occurrence (newChord.t < _diagChord.t): update
             // both t and t0 to restart the entrance animation from the earlier position.
-            if (newChord.t !== _diagChord.t) {
-                _diagChord = newChord.t < _diagChord.t
-                    ? { ..._diagChord, t: newChord.t, t0: newChord.t }  // backward seek
-                    : { ..._diagChord, t: newChord.t };                 // forward restrum
+            if (newChord.t !== getDiagChord().t) {
+                setDiagChord(newChord.t < getDiagChord().t
+                    ? { ...getDiagChord(), t: newChord.t, t0: newChord.t }  // backward seek
+                    : { ...getDiagChord(), t: newChord.t });                 // forward restrum
             }
         }
 
@@ -3560,28 +3660,28 @@ function update(bundle) {
         // If _diagPrevStartT is in the future relative to now, the crossfade was set up
         // during a later playback position that has since been seeked past. Clear it so
         // the stale outgoing diagram does not stay fully visible at the seek target.
-        if (_diagPrev && _diagPrevStartT !== null && _diagPrevStartT > now) {
-            _diagPrev = null; _diagPrevOpacity = 0; _diagPrevStartOpacity = 0;
-            _diagPrevStartT = null;
+        if (getDiagPrev() && getDiagPrevStartT() !== null && getDiagPrevStartT() > now) {
+            setDiagPrev(null); setDiagPrevOpacity(0); setDiagPrevStartOpacity(0);
+            setDiagPrevStartT(null);
         }
 
         // Entrance: derived from t0 (the original appearance time, not updated on
         // forward restrums) so repeated hits of the same chord do not replay the
         // 0.85→1.0 scale animation. On backward seeks t0 is updated alongside t,
         // so the animation still rewinds correctly to the earlier position.
-        const _entranceAnchor = _diagChord && (_diagChord.t0 ?? _diagChord.t);
-        _diagEntranceT = (_diagChord && _entranceAnchor !== undefined)
+        const _entranceAnchor = getDiagChord() && (getDiagChord().t0 ?? getDiagChord().t);
+        setDiagEntranceT(getDiagChord() && _entranceAnchor !== undefined
             ? Math.min(1.0, Math.max(0, (now - _entranceAnchor) / DIAG_ENTRANCE_S))
-            : 1.0;
+            : 1.0);
 
         // Crossfade: derived from absolute start time so backward seeks within the
         // crossfade window correctly rewind the fade. _diagPrev is kept alive (at
         // opacity 0) until the next key change rather than destroyed here, so that a
         // backward seek that re-enters the crossfade window can recompute a positive
         // opacity. Seeks before _diagPrevStartT are handled by the guard above.
-        if (_diagPrev && _diagPrevStartT !== null) {
-            const fadedT = Math.max(0, now - _diagPrevStartT);
-            _diagPrevOpacity = Math.max(0, _diagPrevStartOpacity * (1 - fadedT / DIAG_CROSSFADE_S));
+        if (getDiagPrev() && getDiagPrevStartT() !== null) {
+            const fadedT = Math.max(0, now - getDiagPrevStartT());
+            setDiagPrevOpacity(Math.max(0, getDiagPrevStartOpacity() * (1 - fadedT / DIAG_CROSSFADE_S)));
         }
     }
     // ── Finalise InstancedMesh batches ────────────────────────────────

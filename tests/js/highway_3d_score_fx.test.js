@@ -28,8 +28,8 @@ test('score-fx.js exports createScoreFx', () => {
 test('createScoreFx returns all four expected exports', () => {
     assert.match(
         scoreFxSrc,
-        /return\s*\{\s*fxInit\s*,\s*fxTeardown\s*,\s*fxSpawnPop\s*:\s*_fxSpawnPop\s*,\s*drawScoreFx\s*\}/,
-        'factory must return { fxInit, fxTeardown, fxSpawnPop: _fxSpawnPop, drawScoreFx }',
+        /return\s*\{[^}]*fxInit[^}]*fxTeardown[^}]*fxSpawnPop\s*:\s*_fxSpawnPop[^}]*drawScoreFx[^}]*\}/,
+        'factory must return { fxInit, fxTeardown, fxSpawnPop: _fxSpawnPop, drawScoreFx, ... }',
     );
 });
 
@@ -380,7 +380,7 @@ test('screen.js teardown callsite replaced with fxTeardown()', () => {
 test('createScoreFx({...}) wiring has correct naming correspondence (no param swaps)', () => {
     const PINNED_RENAMES = {};
 
-    const ANCHOR = 'const { fxInit, fxTeardown, fxSpawnPop: _fxSpawnPop, drawScoreFx } = createScoreFx({';
+    const ANCHOR = 'const { fxInit, fxTeardown, fxSpawnPop: _fxSpawnPop, drawScoreFx, fxClearSeen } = createScoreFx({';
     const callStart = src.indexOf(ANCHOR);
     assert.ok(callStart >= 0, 'createScoreFx call must be findable in screen.js');
     const blockStart = callStart + ANCHOR.length - 1;
