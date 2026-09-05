@@ -104,6 +104,14 @@ function loadHighway3dStatics() {
         createBgControl: () => ({
             _pcAcquire() {}, _pcRelease() {},
         }),
+        // h3d-carve-6: material builders moved to src/materials.js.
+        createMaterialBuilders: () => ({
+            txtMat() {}, pinchHarmonicMat() {}, naturalHarmonicMat() {},
+            palmMuteXSpriteMat() {}, fretHandMuteXSpriteMat() {}, muteXMat() {},
+            triMat() {}, bendChevronMat() {}, darkenHex: (hex) => hex, slideArrowMat() {},
+            _meshMatForGhostFretDigit() {}, _spriteMat2MeshMat() {},
+            pool: () => ({ get() {}, reset() {}, warm() { return this; } }),
+        }),
     };
     vm.createContext(sandbox);
     vm.runInContext(instrumented, sandbox, { filename: SCREEN_JS });

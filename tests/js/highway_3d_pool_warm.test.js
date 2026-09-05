@@ -15,6 +15,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
+// h3d-carve-6: pool() moved to src/materials.js; warm() call-sites remain in screen.js.
+const MATERIALS_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'materials.js');
 
 // Brace-balanced extraction so warm() / coercion checks scope to the
 // `function pool(...)` body (matching the helper shape used in
@@ -39,7 +41,8 @@ function extractBlock(src, signature) {
 }
 
 test('pool factory exposes warm(cap)', () => {
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    // h3d-carve-6: pool() lives in src/materials.js (createMaterialBuilders).
+    const src = fs.readFileSync(MATERIALS_JS, 'utf8');
     // The pool() factory's return object must include a `warm(cap)`
     // method. Scope the match to the factory body so an unrelated
     // future `warm(cap)` helper elsewhere in the file can't satisfy
@@ -49,7 +52,8 @@ test('pool factory exposes warm(cap)', () => {
 });
 
 test('pool.warm coerces cap to a non-negative integer', () => {
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    // h3d-carve-6: pool() lives in src/materials.js (createMaterialBuilders).
+    const src = fs.readFileSync(MATERIALS_JS, 'utf8');
     // Same scoping discipline as above — the coercion must live
     // inside the pool factory's warm() body, not anywhere else.
     const poolBody = extractBlock(src, 'function pool(parent, mk)');
