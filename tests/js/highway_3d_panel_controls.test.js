@@ -127,6 +127,7 @@ function loadHighway3dStatics() {
             _timingHex() { return 0x22ff88; },
             _sparkBurst() {},
             _sparkUpdate() {},
+            _applyBloom() {},
             _bloomEnsure() { return null; },
         }),
     };

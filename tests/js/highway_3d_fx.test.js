@@ -332,26 +332,43 @@ test('_applyCinematic sets light intensities per _cinematic flag (both paths)', 
         'cinematic=false: dirLight.intensity must be 0.8 (standard key)');
 });
 
-// ── 11. _h3dHexOrDefault discriminating test (Creed gap fix) ─────────────────
-test('_h3dHexOrDefault parses valid hex and falls back to BG_DEFAULTS', () => {
+// ── 11. _h3dHexOrDefault — source-scan fixture + literal-pin (Creed r2 fix) ──
+test('_h3dHexOrDefault parses valid hex and falls back to BG_DEFAULTS (source-scan fixture)', () => {
+    // Source-scan: extract the REAL BG_DEFAULTS.nutColor from screen.js so the
+    // fixture uses the production default, not an invented value.
+    //
+    // Guard assertions fail if BG_DEFAULTS is removed or restructured in screen.js —
+    // drift becomes loud, not silent.
+    const scr = screenSrc();
+    const bgDefMatch = scr.match(/const BG_DEFAULTS\s*=\s*\{[^}]+\}/);
+    assert.ok(bgDefMatch, 'BG_DEFAULTS object literal must be present in screen.js');
+    const nutColorMatch = bgDefMatch[0].match(/nutColor:\s*'([^']+)'/);
+    assert.ok(nutColorMatch, 'BG_DEFAULTS.nutColor key must be extractable from screen.js source');
+    const PROD_NUT_COLOR = nutColorMatch[1];
+    // Literal-pin: if production nutColor drifts this assertion fails loudly.
+    // To update intentionally: change the pinned value below to match the new production value.
+    assert.equal(PROD_NUT_COLOR, '#f5f3f0',
+        'BG_DEFAULTS.nutColor in screen.js has changed — update this pin if the change is intentional');
+
+    // Build fixture using the real production nutColor (not an invented '#cccccc').
     // Mutation that goes RED: return BG_DEFAULTS.nutColor unconditionally
-    // → valid-hex assertion fails (returns fallback instead of parsed value) → RED.
-    const di = makeDi(); // BG_DEFAULTS.nutColor = '#cccccc'
+    // → valid-hex assertion returns fallback instead of parsed value → RED.
+    const di = makeDi({ BG_DEFAULTS: { nutColor: PROD_NUT_COLOR } });
     const { _h3dHexOrDefault } = loadFxModule(di);
 
     // Valid 6-digit hex with # → parsed integer.
     assert.equal(_h3dHexOrDefault('#a1b2c3', null), 0xa1b2c3,
         'valid hex string must be parsed to its integer value');
 
-    // Hex without # → regex requires #, so falls back to BG_DEFAULTS.nutColor.
-    assert.equal(_h3dHexOrDefault('a1b2c3', null), parseInt('cccccc', 16),
+    // Hex without # → regex requires #, falls back to BG_DEFAULTS.nutColor.
+    assert.equal(_h3dHexOrDefault('a1b2c3', null), parseInt(PROD_NUT_COLOR.slice(1), 16),
         'hex without # must fall back to BG_DEFAULTS.nutColor (regex requires leading #)');
 
-    // Gibberish string → BG_DEFAULTS fallback.
-    assert.equal(_h3dHexOrDefault('not-a-color', null), parseInt('cccccc', 16),
+    // Gibberish → BG_DEFAULTS fallback.
+    assert.equal(_h3dHexOrDefault('not-a-color', null), parseInt(PROD_NUT_COLOR.slice(1), 16),
         'invalid string must fall back to BG_DEFAULTS.nutColor');
 
-    // Explicit defHex overrides BG_DEFAULTS when provided.
+    // Explicit defHex overrides BG_DEFAULTS.
     assert.equal(_h3dHexOrDefault('not-a-color', '#ffffff'), 0xffffff,
         'invalid string with explicit defHex must use defHex, not BG_DEFAULTS');
 });
