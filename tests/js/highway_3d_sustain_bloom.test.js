@@ -5,6 +5,10 @@
 // stops using additive blending, or bumps the bloom renderOrder above the
 // core rail (16) would silently regress or invert the effect.
 //
+// Since h3d-carve-1, _makeGaussTex is defined in src/geometry.js and
+// imported into screen.js; the call site (_bloomGaussTex = _makeGaussTex(...))
+// remains in screen.js.
+//
 // Source-level only — same strategy as the other tests/js/ files.
 
 const { test } = require('node:test');
@@ -13,14 +17,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
+const GEOMETRY_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'geometry.js');
 
 test('a gaussian DataTexture helper (_makeGaussTex) drives the bloom falloff', () => {
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    const geo = fs.readFileSync(GEOMETRY_JS, 'utf8');
     assert.match(
-        src,
-        /function\s+_makeGaussTex\s*\(/,
-        '_makeGaussTex must exist to build the bloom gaussian texture',
+        geo,
+        /export\s+function\s+_makeGaussTex\s*\(/,
+        '_makeGaussTex must be exported from geometry.js to build the bloom gaussian texture',
     );
+    const src = fs.readFileSync(SCREEN_JS, 'utf8');
     assert.match(
         src,
         /_bloomGaussTex\s*=\s*_makeGaussTex\(/,

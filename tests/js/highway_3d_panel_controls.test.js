@@ -28,7 +28,11 @@ function loadHighway3dStatics() {
         1,
         'expected exactly one factory-registration anchor in screen.js',
     );
-    const instrumented = src.replace(
+    // Since h3d-carve-1 screen.js starts with an ES module import statement.
+    // vm.runInContext does not support static import — strip the import line
+    // and provide stub implementations of the geometry exports in the sandbox.
+    const stripped = src.replace(/^import\s+\{[^}]+\}\s+from\s+['"][^'"]+['"];\s*\/\/[^\n]*\n/m, '');
+    const instrumented = stripped.replace(
         ANCHOR,
         `${ANCHOR}\n    window.__h3dTestExports = { BG_DEFAULTS };`,
     );
@@ -50,6 +54,15 @@ function loadHighway3dStatics() {
                 register() {},
             },
         },
+        // Geometry stubs — panel-controls test only reads factory statics;
+        // it never invokes the render path where these are called (h3d-carve-1).
+        geoFretX: (f, _uniform) => f * 0.1,
+        dZ: dt => -dt,
+        slideTrailEnd: () => null,
+        camBaseDistU: span => span,
+        camLowFretPullbackU: () => 0,
+        computeBPM: () => 120,
+        _makeGaussTex: () => ({}),
     };
     vm.createContext(sandbox);
     vm.runInContext(instrumented, sandbox, { filename: SCREEN_JS });

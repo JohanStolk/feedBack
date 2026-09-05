@@ -2,8 +2,12 @@
 // The board can render fret columns either Uniform (equal width, the chart
 // Remastered style) or Logarithmic (real instrument geometry), switchable at
 // runtime via window.h3dSetFretSpacing and persisted in localStorage. A
-// refactor that renames the storage key, drops the uniform/log branch in
-// fretX, or stops validating the mode would silently regress the setting.
+// refactor that renames the storage key, drops the delegator in fretX, or
+// stops validating the mode would silently regress the setting.
+//
+// Since h3d-carve-1, the uniform/log branch lives in src/geometry.js
+// (geoFretX); screen.js keeps a 1-arg delegator:
+//   const fretX = f => geoFretX(f, _h3dFretUniform);
 //
 // Source-level only — same strategy as the other tests/js/ files.
 
@@ -13,6 +17,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
+const GEOMETRY_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'geometry.js');
 
 test('fret-spacing mode is read from the highway_3d.fretSpacing localStorage key', () => {
     const src = fs.readFileSync(SCREEN_JS, 'utf8');
@@ -23,12 +28,18 @@ test('fret-spacing mode is read from the highway_3d.fretSpacing localStorage key
     );
 });
 
-test('fretX switches between the uniform and logarithmic implementations', () => {
+test('fretX is a 1-arg delegator to geoFretX in screen.js (h3d-carve-1)', () => {
     const src = fs.readFileSync(SCREEN_JS, 'utf8');
     assert.match(
         src,
-        /const\s+fretX\s*=\s*f\s*=>\s*_h3dFretUniform\s*\?\s*_fretXUni\(f\)\s*:\s*_fretXLog\(f\)/,
-        'fretX must pick _fretXUni when _h3dFretUniform else _fretXLog',
+        /const\s+fretX\s*=\s*f\s*=>\s*geoFretX\(\s*f\s*,\s*_h3dFretUniform\s*\)/,
+        'screen.js fretX must delegate to geoFretX(f, _h3dFretUniform) from geometry.js',
+    );
+    const geo = fs.readFileSync(GEOMETRY_JS, 'utf8');
+    assert.match(
+        geo,
+        /export\s+const\s+geoFretX\s*=\s*\(\s*f\s*,\s*uniform\s*\)\s*=>/,
+        'geometry.js must export geoFretX as a 2-arg function (fret, uniform)',
     );
 });
 
