@@ -232,3 +232,84 @@ test('drawLyrics returns a finite number', () => {
     assert.ok(typeof result === 'number' && isFinite(result),
         'drawLyrics must return a finite number (bottom Y of lyrics banner)');
 });
+
+// Recording ctx — captures fillText/roundRect/fill for discriminating render assertions.
+// Only used by tests 9 and 10 below; makeCtx() remains the non-recording stub.
+function makeRecordingCtx() {
+    const calls = [];
+    const base = makeCtx();
+    return new Proxy(base, {
+        get(t, prop) {
+            if (prop === '_calls') return calls;
+            if (prop === 'fillText') {
+                return function(text, x, y) { calls.push({ method: 'fillText', text }); };
+            }
+            if (prop === 'roundRect') {
+                return function(...args) { calls.push({ method: 'roundRect' }); };
+            }
+            if (prop === 'fill') {
+                return function() { calls.push({ method: 'fill' }); };
+            }
+            return typeof t[prop] === 'function' ? t[prop].bind(t) : t[prop];
+        },
+        set(t, prop, val) { t[prop] = val; return true; },
+    });
+}
+
+// ── 9. drawToneHud real rendering path — discriminating (class-killer) ────────
+test('drawToneHud renders tone name and HUD card when tone state is non-empty', () => {
+    // Mutation that must go RED: `return 0` inserted at overlay.js:631 (Creed's exact
+    // injection, top of drawToneHud body after the destructure).
+    // With that mutation: _calls stays empty, boxH=0 → all three assertions fail → RED.
+    //
+    // Scenario: t=5, toneBase='Clean', one upcoming change at t=10 ('Lead').
+    const { drawToneHud } = loadModule(new Map());
+    const ctx = makeRecordingCtx();
+
+    const boxH = drawToneHud(ctx, {
+        toneBase: 'Clean',
+        toneChanges: [{ t: 10, name: 'Lead' }],
+        currentTime: 5,
+        canvasW: 800, canvasH: 600,
+        position: 'tl', sizeSlider: 0.5,
+    });
+
+    assert.ok(boxH > 0,
+        'drawToneHud must return boxH > 0 with non-empty tone state (current=Clean, next=Lead)');
+    const texts = ctx._calls.filter(c => c.method === 'fillText').map(c => c.text);
+    assert.ok(texts.some(t => t.includes('Clean')),
+        'drawToneHud must fillText the current tone name; got: ' + JSON.stringify(texts));
+    assert.ok(texts.some(t => t.includes('Lead')),
+        'drawToneHud must fillText the next tone name; got: ' + JSON.stringify(texts));
+    assert.ok(ctx._calls.some(c => c.method === 'fill'),
+        'drawToneHud must call ctx.fill() (background card) with non-empty state');
+});
+
+// ── 10. drawSectionHud real rendering path — discriminating (class-killer) ────
+test('drawSectionHud renders section name and HUD card when sections are non-empty', () => {
+    // Mutation that must go RED: `return 0` inserted after the early-exit guard
+    // (after the `if (!sections || !sections.length) return 0;` line), gutting the
+    // non-empty rendering branch of drawSectionHud.
+    // With that mutation: _calls stays empty, boxH=0 → all three assertions fail → RED.
+    //
+    // Scenario: two sections, currentTime in the first one.
+    const { drawSectionHud } = loadModule(new Map());
+    const ctx = makeRecordingCtx();
+
+    const boxH = drawSectionHud(ctx, {
+        sections: [{ time: 0, name: 'Intro' }, { time: 10, name: 'Verse' }],
+        currentTime: 5,
+        canvasW: 800, canvasH: 600,
+        position: 'tr', sizeSlider: 0.5,
+    });
+
+    assert.ok(boxH > 0,
+        'drawSectionHud must return boxH > 0 with non-empty sections (cur=Intro, next=Verse)');
+    const texts = ctx._calls.filter(c => c.method === 'fillText').map(c => c.text);
+    assert.ok(texts.some(t => t.includes('Intro')),
+        'drawSectionHud must fillText the current section name; got: ' + JSON.stringify(texts));
+    assert.ok(texts.some(t => t.includes('Verse')),
+        'drawSectionHud must fillText the next section name; got: ' + JSON.stringify(texts));
+    assert.ok(ctx._calls.some(c => c.method === 'fill'),
+        'drawSectionHud must call ctx.fill() (background card) with non-empty state');
+});
