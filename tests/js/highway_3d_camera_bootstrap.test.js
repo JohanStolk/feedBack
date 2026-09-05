@@ -245,3 +245,109 @@ test('setFretRowFitBoost write-back is called in camUpdate (boost persists acros
         'camUpdate must write _fretRowFitBoost back via setFretRowFitBoost(); removing it silences the boost',
     );
 });
+
+// ── h3d-carve-9 Creed r1: naming-correspondence guard (param-swap class-killer) ──
+// Structural source-scan: every entry in createCamera({...}) must satisfy its
+// naming-correspondence class. Kills swaps like (CAM_H_BASE: CAM_DIST_BASE) and
+// wrong-var getters ((getCurX: () => curDist)) across the whole wiring surface.
+// cut-13 additions inherit the guard automatically; only the pinned fn-ref renames
+// need a one-line entry in PINNED_RENAMES when a new rename is introduced.
+
+test('createCamera({...}) wiring has correct naming correspondence (no param swaps)', () => {
+    // Fn-ref renames that intentionally differ from shorthand — pinned exhaustively.
+    const PINNED_RENAMES = {
+        freeCamFor: '_freeCamFor',
+        aspectPaneKey: '_aspectPaneKey',
+        resolveTuneFor: '_resolveTuneFor',
+        aspectRegisterPane: '_aspectRegisterPane',
+    };
+
+    // 1. Extract the argument block from the createCamera call.
+    const ANCHOR = 'const { effectiveVfov, camUpdate } = createCamera({';
+    const callStart = src.indexOf(ANCHOR);
+    assert.ok(callStart >= 0, 'createCamera call must be findable in screen.js');
+    const blockStart = callStart + ANCHOR.length - 1; // points to the opening {
+    assert.equal(src[blockStart], '{', 'expected { at computed blockStart');
+    let depth = 0, blockEnd = -1;
+    for (let i = blockStart; i < src.length; i++) {
+        if (src[i] === '{') depth++;
+        else if (src[i] === '}' && --depth === 0) { blockEnd = i; break; }
+    }
+    assert.ok(blockEnd > blockStart, 'createCamera argument block must have balanced braces');
+    const inner = src.slice(blockStart + 1, blockEnd);
+
+    // 2. Split into entries at depth-0 commas (setter bodies contain { } — skip them).
+    const rawEntries = [];
+    let current = '', d = 0;
+    for (let i = 0; i < inner.length; i++) {
+        const ch = inner[i];
+        if (ch === '{') d++;
+        else if (ch === '}') d--;
+        if (ch === ',' && d === 0) {
+            const t = current.trim();
+            if (t) rawEntries.push(t);
+            current = '';
+        } else {
+            current += ch;
+        }
+    }
+    if (current.trim()) rawEntries.push(current.trim());
+
+    // Strip line comments and blank entries.
+    const entries = rawEntries
+        .map(e => e.replace(/\/\/[^\n]*/g, '').trim())
+        .filter(Boolean);
+
+    assert.ok(entries.length >= 48, `expected at least 48 entries, got ${entries.length}`);
+
+    const violations = [];
+    for (const entry of entries) {
+        if (!entry.includes(':')) {
+            // Shorthand — key === value by definition (BASE_VFOV, sY, …).
+            continue;
+        }
+        const colonIdx = entry.indexOf(':');
+        const key = entry.slice(0, colonIdx).trim();
+        const value = entry.slice(colonIdx + 1).trim();
+
+        if (key in PINNED_RENAMES) {
+            if (value !== PINNED_RENAMES[key]) {
+                violations.push(`${key}: pinned to '${PINNED_RENAMES[key]}' but got '${value}'`);
+            }
+            continue;
+        }
+
+        if (key.startsWith('get')) {
+            // () => [_]varStem — varStem (no underscore) must match key minus 'get' prefix.
+            const expectedStem = key[3].toLowerCase() + key.slice(4);
+            const m = value.match(/^\(\)\s*=>\s*_?(\w+)$/);
+            if (!m) {
+                violations.push(`${key}: getter value '${value}' does not match () => [_]var`);
+                continue;
+            }
+            if (m[1] !== expectedStem) {
+                violations.push(`${key}: getter body references var stem '${m[1]}' but expected '${expectedStem}'`);
+            }
+            continue;
+        }
+
+        if (key.startsWith('set')) {
+            // (v) => { [_]varStem = v; } — varStem must match key minus 'set' prefix.
+            const expectedStem = key[3].toLowerCase() + key.slice(4);
+            const m = value.match(/^\(v\)\s*=>\s*\{\s*_?(\w+)\s*=\s*v\s*;\s*\}$/);
+            if (!m) {
+                violations.push(`${key}: setter value '${value}' does not match (v) => { [_]var = v; }`);
+                continue;
+            }
+            if (m[1] !== expectedStem) {
+                violations.push(`${key}: setter assigns var stem '${m[1]}' but expected '${expectedStem}'`);
+            }
+            continue;
+        }
+
+        // key:value form that is NOT a getter, setter, or pinned rename — disallowed.
+        violations.push(`${key}: key:value entry not in PINNED_RENAMES and not a get/set arrow`);
+    }
+
+    assert.deepEqual(violations, [], `createCamera wiring violations found`);
+});
