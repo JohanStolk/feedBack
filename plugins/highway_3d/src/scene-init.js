@@ -26,7 +26,6 @@ export function createSceneInit({
     SPARK_N,
     _ND_TTL_MS, _ND_TIME_EPS,
     FRET_WIRE_HIT_HEX, FRET_WIRE_HIT_EMISSIVE, FRET_WIRE_IDLE_HEX, FRET_WIRE_IDLE_OP,
-    FRET_WIRE_HIT_OP, FRET_WIRE_HIT_INTENSITY, FRET_WIRE_HIT_DECAY,
     ACCENT_RIM_BASE_EMISSIVE,
     ACCENT_HALO_OP_NEAR, ACCENT_HALO_OP_MID, ACCENT_HALO_OP_FAR,
     ACCENT_HALO_XY_INNER, ACCENT_HALO_XY_MID, ACCENT_HALO_XY_OUTER,
@@ -49,7 +48,6 @@ export function createSceneInit({
     _darkenInt, _lightenInt, _h3dHexToInt,
     boardSpanX,
     _bcCreateController,
-    updateStringHighlights,
     canvasSize, applySize,
     fxInit,
     _disposeOpenStringPitchSprites,
@@ -73,7 +71,6 @@ export function createSceneInit({
     getVibrancyIdleOp, getVibrancyProjOp,
     getBgReactiveOptOut,
     getVenueSceneOverride,
-    getIsDestroyed,
     // ── Getter+setter pairs (written here; read by renderer.js / teardown etc.) ─
     getWrap, setWrap,
     getRen, setRen,
@@ -115,7 +112,6 @@ export function createSceneInit({
     getStringLines, setStringLines,
     getProjMeshArr, setProjMeshArr,
     getBcCtrl, setBcCtrl,
-    setChartEnv, setChartPrevT, setBcBeatIdx, setBcNoteIdx, setBcChordIdx,
     getSparkPos, setSparkPos,
     getSparkCol, setSparkCol,
     setSparkVel, setSparkLife, setSparkPts,
@@ -188,7 +184,6 @@ export function createSceneInit({
     setTuningLabelsVisible,
     setProjectionVisible,
     setSlideArrowApproachVisible, setSlideArrowNeckVisible, setSlideArrowChainPreviewVisible,
-    setTintR, setTintG, setTintB,
     setBoardStringStartX, setBoardTuningLabelX,
     getNdOnHit, setNdOnHit,
     getNdOnMiss, setNdOnMiss,
@@ -1827,12 +1822,12 @@ export function createSceneInit({
             // when the user has never explicitly written them. Once the user
             // moves either slider, the corresponding _bgHasStored() flips
             // true and the read becomes independent.
-            setZoomSmoothing(_bgHasStored(panelKey, 'zoomSmoothing'))
+            setZoomSmoothing(_bgHasStored(panelKey, 'zoomSmoothing')
                 ? _bgReadSetting(panelKey, 'zoomSmoothing')
-                : _cameraSmoothing;
-            setTiltSmoothing(_bgHasStored(panelKey, 'tiltSmoothing'))
+                : _cameraSmoothing);
+            setTiltSmoothing(_bgHasStored(panelKey, 'tiltSmoothing')
                 ? _bgReadSetting(panelKey, 'tiltSmoothing')
-                : _cameraSmoothing;
+                : _cameraSmoothing);
             setCameraLockLow(_bgReadSetting(panelKey, 'cameraLockLow'));
             setCameraLockZoom(_bgReadSetting(panelKey, 'cameraLockZoom'));
             setCameraMode(_bgReadSetting(panelKey, 'cameraMode'));

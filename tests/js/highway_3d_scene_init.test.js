@@ -96,8 +96,9 @@ test('createSceneInit receives ≥150 DI parameters (anti-vacuity floor)', () =>
     // Anti-vacuity floor — if regex changes and extracts 0, this fails loudly
     assert.ok(names.size >= 150, `anti-vacuity: expected ≥150 DI params, got ${names.size}`);
     // Exact pinned count — update this if DI surface intentionally changes
-    assert.strictEqual(names.size, 183,
-        `exact DI param count must be 183 (got ${names.size}) — update if DI surface changes`);
+    // Cut-16 tip: 183. After F2 (remove 5 dead-param lines): 178.
+    assert.strictEqual(names.size, 178,
+        `exact DI param count must be 178 (got ${names.size}) — update if DI surface changes`);
 });
 
 // ── §5 Import correctness ─────────────────────────────────────────────────────
@@ -248,6 +249,74 @@ test('kill: _bcSyncMode body calls setBcCtrl(', () => {
         '_bcSyncMode must call setBcCtrl() — gut it and bcCtrl in screen.js scope is never updated; BC stays dead');
 });
 
+// F1 kill: ternary must be INSIDE the setter argument (not truncated to boolean).
+// Mutation: add extra ) after _bgHasStored(...) closing paren → argument becomes a bare boolean
+// → argument text has no '?' → RED.
+// A helper to extract the full argument (handles nested parens).
+function extractSetterArg(src, fnName) {
+    const idx = src.indexOf(fnName + '(');
+    if (idx === -1) return null;
+    let depth = 0, argStart = -1, i = idx + fnName.length;
+    while (i < src.length) {
+        if (src[i] === '(') { if (depth === 0) argStart = i + 1; depth++; }
+        else if (src[i] === ')') { depth--; if (depth === 0) return src.slice(argStart, i); }
+        i++;
+    }
+    return null;
+}
+
+test('kill: setZoomSmoothing argument contains ternary ? (not truncated to boolean)', () => {
+    const src = fs.readFileSync(sceneInitJs, 'utf8');
+    const arg = extractSetterArg(src, 'setZoomSmoothing');
+    assert.ok(arg !== null, 'setZoomSmoothing call must exist in scene-init.js');
+    assert.ok(arg.includes('?'),
+        'setZoomSmoothing argument must include ternary ? — ' +
+        'if missing, the boolean condition was stored instead of the camera-smoothing value (F1 regression)');
+});
+
+test('kill: setTiltSmoothing argument contains ternary ? (not truncated to boolean)', () => {
+    const src = fs.readFileSync(sceneInitJs, 'utf8');
+    const arg = extractSetterArg(src, 'setTiltSmoothing');
+    assert.ok(arg !== null, 'setTiltSmoothing call must exist in scene-init.js');
+    assert.ok(arg.includes('?'),
+        'setTiltSmoothing argument must include ternary ? — ' +
+        'if missing, the boolean condition was stored instead of the camera-smoothing value (F1 regression)');
+});
+
+// ── §9 Naming-correspondence guard ────────────────────────────────────────────
+// For every getX in the DI signature, assert a matching setX exists — or the
+// getter is in READ_ONLY (stable state never written by scene-init).
+// Mutation: rename setWrap → setWrp in scene-init.js DI → getWrap has no pair → RED.
+
+test('createSceneInit DI: every getX has a corresponding setX (naming correspondence)', () => {
+    const src = fs.readFileSync(sceneInitJs, 'utf8');
+    const sigStart = src.indexOf('export function createSceneInit({');
+    const bodyOpen = src.indexOf('\n}) {', sigStart);
+    const paramBlock = src.slice(sigStart, bodyOpen);
+
+    const setters = new Set(
+        [...paramBlock.matchAll(/\bset([A-Z][A-Za-z0-9]*)\b/g)].map(m => m[1])
+    );
+    const getters = [
+        ...paramBlock.matchAll(/\bget([A-Z][A-Za-z0-9]*)\b/g)
+    ].map(m => m[1]);
+
+    // Stable read-only refs: screen.js never writes these after initial capture.
+    // scene-init receives getX but has no setX because it never needs to update them.
+    // Pinned: update only when a new stable-ref getter is added to the DI.
+    const READ_ONLY = new Set([
+        'BgReactiveOptOut', 'H3dFretUniform', 'InstanceId',
+        'LeftyCached', 'NStr', 'VenueSceneOverride',
+    ]);
+
+    for (const g of getters) {
+        if (READ_ONLY.has(g)) continue;
+        assert.ok(setters.has(g),
+            `DI naming gap: get${g} has no matching set${g} — ` +
+            `add setter to DI or add to READ_ONLY list in this test`);
+    }
+});
+
 // ── §10 Execution smoke (§11 gate-2 of contract) ─────────────────────────────
 // new-Function harness: wrap scene-init.js in a function call, inject recording
 // DI stubs, invoke createSceneInit and then initScene(). The expected failure
@@ -272,7 +341,7 @@ test('smoke: createSceneInit factory returns expected 4-key surface', () => {
     }
 });
 
-test('smoke: new-Function harness — setters called before null-T throw', () => {
+test('smoke: new-Function harness — factory construction + null-canvas early guard', () => {
     const rawSrc = fs.readFileSync(sceneInitJs, 'utf8');
 
     // Strip ES module syntax for new Function
@@ -307,7 +376,6 @@ test('smoke: new-Function harness — setters called before null-T throw', () =>
         SPARK_N: 256, _ND_TTL_MS: 1000, _ND_TIME_EPS: 0.01,
         FRET_WIRE_HIT_HEX: '#fff', FRET_WIRE_HIT_EMISSIVE: 1,
         FRET_WIRE_IDLE_HEX: '#888', FRET_WIRE_IDLE_OP: 0.5,
-        FRET_WIRE_HIT_OP: 1, FRET_WIRE_HIT_INTENSITY: 2, FRET_WIRE_HIT_DECAY: 0.9,
         ACCENT_RIM_BASE_EMISSIVE: 0.5,
         ACCENT_HALO_OP_NEAR: 0.8, ACCENT_HALO_OP_MID: 0.5, ACCENT_HALO_OP_FAR: 0.2,
         ACCENT_HALO_XY_INNER: 0.1, ACCENT_HALO_XY_MID: 0.2, ACCENT_HALO_XY_OUTER: 0.3,
@@ -329,7 +397,7 @@ test('smoke: new-Function harness — setters called before null-T throw', () =>
         _venueSwapPlateIfNeeded: () => {}, _darkenInt: (v) => v,
         _lightenInt: (v) => v, _h3dHexToInt: () => 0,
         boardSpanX: () => 10, _bcCreateController: () => ({}),
-        updateStringHighlights: () => {}, canvasSize: () => ({ w: 800, h: 600 }),
+        canvasSize: () => ({ w: 800, h: 600 }),
         applySize: () => {}, fxInit: () => {},
         _disposeOpenStringPitchSprites: () => {},
         // Stable refs
@@ -348,7 +416,7 @@ test('smoke: new-Function harness — setters called before null-T throw', () =>
         getTextSize: makeGetter(1), getGlowMul: makeGetter(1),
         getVibrancyIdleOp: makeGetter(0.5), getVibrancyProjOp: makeGetter(0.3),
         getBgReactiveOptOut: makeGetter(false),
-        getVenueSceneOverride: makeGetter(null), getIsDestroyed: makeGetter(false),
+        getVenueSceneOverride: makeGetter(null),
         getVibrancy: makeGetter(0.5),
     };
 
