@@ -13,6 +13,7 @@ const path = require('node:path');
 
 const highwayJs = path.join(__dirname, '..', '..', 'static', 'highway.js');
 const highway3dJs = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
+const sceneInitJs = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'scene-init.js'); // h3d-carve-16
 // The highway string-colour manager was carved out of app.js into its own
 // module (R3a).
 const appJs = path.join(__dirname, '..', '..', 'static', 'js', 'highway-colors.js');
@@ -78,7 +79,8 @@ test('2D public API exposes getStringColors / setStringColors', () => {
 // ── 3D highway (plugins/highway_3d/screen.js) ─────────────────────────────
 
 test('3D adds a custom palette path + h3dBgSetStringColors setter', () => {
-    const src = fs.readFileSync(highway3dJs, 'utf8');
+    // _bgLoadSettings (lines 89-90) moved to scene-init.js in h3d-carve-16 — combine both
+    const src = fs.readFileSync(highway3dJs, 'utf8') + '\n' + fs.readFileSync(sceneInitJs, 'utf8');
     assert.match(src, /window\.h3dBgSetStringColors\s*=/, 'window.h3dBgSetStringColors must be defined');
     assert.match(src, /_bgWriteGlobal\('customColors'/, 'setter must persist customColors');
     assert.match(src, /_bgWriteGlobal\('palette',\s*'custom'\)/, "setter must flip palette to 'custom'");
@@ -91,7 +93,8 @@ test('3D adds a custom palette path + h3dBgSetStringColors setter', () => {
 });
 
 test('3D gem-body gradients follow the active palette (not hardcoded)', () => {
-    const src = fs.readFileSync(highway3dJs, 'utf8');
+    // _recolorGemGradients + _applyPaletteToMaterials moved to scene-init.js in h3d-carve-16
+    const src = fs.readFileSync(sceneInitJs, 'utf8');
     // The gem bodies (strings 0..5) are a baked per-vertex gradient; a custom
     // palette must recolor them, else gems/sustain/vibrato heads stay stock.
     assert.match(src, /function _recolorGemGradients\(\)/, '_recolorGemGradients must exist');

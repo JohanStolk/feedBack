@@ -10,6 +10,7 @@ const path = require('node:path');
 
 const highwayJs = path.join(__dirname, '..', '..', 'static', 'highway.js');
 const highway3dJs = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
+const sceneInitJs = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'scene-init.js'); // h3d-carve-16
 
 // Brace-balanced extraction so a future method that grows guards or
 // nested blocks doesn't get truncated by a naive `[^}]*\}` regex.
@@ -131,10 +132,10 @@ test('api.setVisible accepts bool / null and re-emits inline', () => {
 });
 
 test('3D Highway subscribes to highway:visibility and toggles wrap on hide', () => {
+    // initScene moved to scene-init.js in h3d-carve-16; teardown stays in screen.js
+    const sceneInitSrc = fs.readFileSync(sceneInitJs, 'utf8');
     const src = fs.readFileSync(highway3dJs, 'utf8');
-    // Scope to lifecycle blocks so unrelated / commented mentions
-    // elsewhere in screen.js can't cause false positives.
-    const initSceneBlock = extractBlock(src, 'function initScene()');
+    const initSceneBlock = extractBlock(sceneInitSrc, 'function initScene()');
     const teardownBlock = extractBlock(src, 'function teardown()');
 
     // Listener registration with the documented event name (in init).
@@ -146,23 +147,25 @@ test('3D Highway subscribes to highway:visibility and toggles wrap on hide', () 
     // Handler filters by canvas identity so splitscreen panels don't
     // hide each other's overlays — every instance receives every event
     // on the shared feedBack bus, so this gate is essential.
-    assert.match(
-        initSceneBlock,
-        /e\.detail\.canvas\s*!==\s*highwayCanvas/,
+    // Accept DI-rewritten form (getHighwayCanvas()) as well as original (highwayCanvas) — h3d-carve-16
+    assert.ok(
+        /e\.detail\.canvas\s*!==\s*highwayCanvas/.test(initSceneBlock) ||
+        /e\.detail\.canvas\s*!==\s*getHighwayCanvas\(\)/.test(initSceneBlock),
         'handler must filter on event.detail.canvas !== highwayCanvas (splitscreen-safe)',
     );
-    // Handler toggles wrap.style.display based on visible === false.
-    assert.match(
-        initSceneBlock,
-        /wrap\.style\.display\s*=\s*v\s*===\s*false\s*\?\s*['"]none['"]\s*:\s*['"]['"]/,
+    // Handler toggles wrap/getWrap() display based on visible === false.
+    assert.ok(
+        /wrap\.style\.display\s*=\s*v\s*===\s*false\s*\?\s*['"]none['"]\s*:\s*['"]/.test(initSceneBlock) ||
+        /getWrap\(\)\.style\.display\s*=\s*v\s*===\s*false\s*\?\s*['"]none['"]\s*:\s*['"]/.test(initSceneBlock),
         'handler must hide the wrap when visible === false',
     );
     // Initial-sync on bind so renderers that mount while the canvas
     // is already hidden (e.g. plugin loaded mid-splitscreen) don't
     // leave the wrap stuck in the wrong state.
-    assert.match(
-        initSceneBlock,
-        /highwayCanvas\.offsetParent\s*!==\s*null/,
+    // Accept DI-rewritten form (getHighwayCanvas()) as well as direct ref — h3d-carve-16
+    assert.ok(
+        /highwayCanvas\.offsetParent\s*!==\s*null/.test(initSceneBlock) ||
+        /getHighwayCanvas\(\)\.offsetParent\s*!==\s*null/.test(initSceneBlock),
         'initScene must compute initial visibility from local highwayCanvas (splitscreen-safe)',
     );
     // Subscribes to highway:canvas-replaced so the identity gate
@@ -173,9 +176,10 @@ test('3D Highway subscribes to highway:visibility and toggles wrap on hide', () 
         /window\.feedBack\.on\(\s*['"]highway:canvas-replaced['"]/,
         'initScene must track canvas swaps so the visibility gate keeps matching',
     );
-    assert.match(
-        initSceneBlock,
-        /highwayCanvas\s*=\s*e\.detail\.newCanvas/,
+    // Accept DI-rewritten form for canvas-replaced handler — h3d-carve-16
+    assert.ok(
+        /highwayCanvas\s*=\s*e\.detail\.newCanvas/.test(initSceneBlock) ||
+        /setHighwayCanvas\(\s*e\.detail\.newCanvas\s*\)/.test(initSceneBlock),
         'canvas-replaced handler must update the local highwayCanvas reference',
     );
     // Teardown unbinds both listeners.
