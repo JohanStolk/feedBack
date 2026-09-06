@@ -84,7 +84,7 @@ export function createSceneInit({
     getBeatG, setBeatG,
     getLblG, setLblG,
     getLyricsCanvas, setLyricsCanvas, setLyricsCtx,
-    getHighwayCanvas: _getHighwayCanvasAlias, setHighwayCanvas,
+    setHighwayCanvas,
     getVisibilityHandler, setVisibilityHandler,
     getCanvasReplacedHandler, setCanvasReplacedHandler,
     getOnCtxLost, setOnCtxLost,

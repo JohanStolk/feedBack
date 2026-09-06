@@ -96,9 +96,10 @@ test('createSceneInit receives ≥150 DI parameters (anti-vacuity floor)', () =>
     // Anti-vacuity floor — if regex changes and extracts 0, this fails loudly
     assert.ok(names.size >= 150, `anti-vacuity: expected ≥150 DI params, got ${names.size}`);
     // Exact pinned count — update this if DI surface intentionally changes
-    // Cut-16 tip: 183. After F2 (remove 5 dead-param lines): 178.
-    assert.strictEqual(names.size, 178,
-        `exact DI param count must be 178 (got ${names.size}) — update if DI surface changes`);
+    // Cut-16 tip: 183. After F2 (remove 5 dead-param lines): 178. Cut-17 alias removal: 179.
+    // (removing the alias moved setHighwayCanvas to line-start, adding it to the line-first count)
+    assert.strictEqual(names.size, 179,
+        `exact DI param count must be 179 (got ${names.size}) — update if DI surface changes`);
 });
 
 // ── §5 Import correctness ─────────────────────────────────────────────────────
@@ -177,10 +178,10 @@ test('_bcSyncMode no longer defined in screen.js (moved to scene-init.js)', () =
 
 // ── §8 plugin.json version bump ───────────────────────────────────────────────
 
-test('plugin.json version is 3.52.0 (bumped for cut-16)', () => {
+test('plugin.json version is 3.53.0 (bumped for cut-17)', () => {
     const pkg = JSON.parse(fs.readFileSync(pluginJson, 'utf8'));
-    assert.equal(pkg.version, '3.52.0',
-        'plugin.json must be bumped to 3.52.0 for cut-16');
+    assert.equal(pkg.version, '3.53.0',
+        'plugin.json must be bumped to 3.53.0 for cut-17');
 });
 
 // ── §9 Setter-call kill tests (§10 of contract) ───────────────────────────────
@@ -455,4 +456,10 @@ test('smoke: new-Function harness — factory construction + null-canvas early g
     // without a real canvas. Source-scan kill tests above cover the setter-call
     // paths that require WebGL. ESLint no-undef is the compensating layer for
     // WRITE paths in sloppy-mode new-Function.
+});
+
+test('_getHighwayCanvasAlias does not appear in scene-init.js (dead alias removed in cut-17)', () => {
+    const src = fs.readFileSync(sceneInitJs, 'utf8');
+    assert.ok(!src.includes('_getHighwayCanvasAlias'),
+        '_getHighwayCanvasAlias must not appear in scene-init.js — dead alias was removed in cut-17');
 });

@@ -21,7 +21,7 @@ export function createArp({
     // ── plain const shorthand (fn refs or number consts, never reassigned) ──
     validString,            // IIFE fn decl ~line 3736
     filterValidNotes,       // IIFE fn decl ~line 3767 — used by arpeggioLaneDividerFrameAccentMul
-    sY,                     // const fn at line 4025: s => S_BASE + (...) * S_GAP (captures live vars)
+    sY,                     // factory-scope fn: s => S_BASE + (...) * S_GAP (captures live vars)
     K,                      // module-level const line 124
     S_GAP,                  // module-level const line 203
     BEHIND,                 // module-level const line 206

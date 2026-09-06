@@ -1,7 +1,7 @@
 // h3d-carve-14: V-section (note renderer) → src/note-renderer.js
 // Source: plugins/highway_3d/screen.js lines 10172–11604 (pre-cut).
 // Factory pattern: createNoteRenderer({DI}) → { drawNote, drawArpBrackets, drawNotedetectLabels, chordHarmonyLabels }
-// chordHarmonyLabels is also called from update() (U-section) at line 9016.
+// chordHarmonyLabels is also called from update() (U-section) in src/renderer.js.
 //
 // DI surface: 130 params
 //   - 27 constants (shorthand)
@@ -928,14 +928,14 @@ export function createNoteRenderer({
                     // open-note body. Fretted notes keep the
                     // single-trail path. Offsets are scaled by
                     // `openWScale` (the same body-width scale
-                    // computed at line 7367) so the trails stay
-                    // underneath the body's edges no matter how wide
+                    // computed above via openChordBoxWidth) so the trails
+                    // stay underneath the body's edges no matter how wide
                     // the anchor lane is. Chord-member open strings
                     // can't reach here (guarded at the `hasSus`
                     // check above).
                     //
                     // openTrailOff is always > 0 because openWScale
-                    // is clamped >= 0.22 at line 7368 (or defaults
+                    // is clamped >= 0.22 above (or defaults
                     // to 1 when there's no openChordBoxWidth), so
                     // openTrailOff >= NW * 3 * 0.22 = 3.3 * K.
                     // No degenerate-small-offset fallback needed.
