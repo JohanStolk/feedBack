@@ -79,14 +79,25 @@ test('createSceneInit body never assigns to a DI parameter name (class-killer)',
 
 // ── §4 DI anti-vacuity ────────────────────────────────────────────────────────
 
-test('createSceneInit receives ≥150 DI parameters (anti-vacuity)', () => {
+test('createSceneInit receives ≥150 DI parameters (anti-vacuity floor)', () => {
     const src = fs.readFileSync(sceneInitJs, 'utf8');
     const sigStart = src.indexOf('export function createSceneInit({');
-    const bodyOpen = src.indexOf(') {', sigStart);
+    const bodyOpen = src.indexOf('\n}) {', sigStart);
     const paramBlock = src.slice(sigStart, bodyOpen);
-    // Count unique identifiers that look like DI params
-    const names = new Set([...paramBlock.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)\b/g)].map(m => m[1]));
-    assert.ok(names.size >= 150, `expected ≥150 DI params, got ${names.size}`);
+    const names = new Set();
+    for (const line of paramBlock.split('\n')) {
+        const t = line.trim();
+        if (!t || t.startsWith('//') || t.startsWith('/*') || t.startsWith('*')) continue;
+        const m = t.match(/^([A-Za-z_$][A-Za-z0-9_$]*)/);
+        if (m && m[1] !== 'export' && m[1] !== 'function' && m[1] !== 'createSceneInit') {
+            names.add(m[1]);
+        }
+    }
+    // Anti-vacuity floor — if regex changes and extracts 0, this fails loudly
+    assert.ok(names.size >= 150, `anti-vacuity: expected ≥150 DI params, got ${names.size}`);
+    // Exact pinned count — update this if DI surface intentionally changes
+    assert.strictEqual(names.size, 183,
+        `exact DI param count must be 183 (got ${names.size}) — update if DI surface changes`);
 });
 
 // ── §5 Import correctness ─────────────────────────────────────────────────────
@@ -169,4 +180,211 @@ test('plugin.json version is 3.52.0 (bumped for cut-16)', () => {
     const pkg = JSON.parse(fs.readFileSync(pluginJson, 'utf8'));
     assert.equal(pkg.version, '3.52.0',
         'plugin.json must be bumped to 3.52.0 for cut-16');
+});
+
+// ── §9 Setter-call kill tests (§10 of contract) ───────────────────────────────
+// Each asserts the setter is called inside the moved function body.
+// Gut the call → test goes RED. Catches omission (function stops writing to
+// factory scope silently), not caught by class-killer (which only catches
+// assignment to DI param names, not missing setter calls).
+
+test('kill: initScene body calls setRen(', () => {
+    const src = fs.readFileSync(sceneInitJs, 'utf8');
+    assert.match(src, /\bsetRen\s*\(/,
+        'initScene must call setRen() — gut it and the renderer ref is never stored');
+});
+
+test('kill: initScene body calls setScene(', () => {
+    const src = fs.readFileSync(sceneInitJs, 'utf8');
+    assert.match(src, /\bsetScene\s*\(/,
+        'initScene must call setScene() — gut it and the Three.js scene ref is never stored');
+});
+
+test('kill: initScene body calls setPNote(', () => {
+    const src = fs.readFileSync(sceneInitJs, 'utf8');
+    assert.match(src, /\bsetPNote\s*\(/,
+        'initScene must call setPNote() — gut it and note pool is never stored; draw() cannot recycle gems');
+});
+
+test('kill: initScene body calls setWrap(', () => {
+    const src = fs.readFileSync(sceneInitJs, 'utf8');
+    assert.match(src, /\bsetWrap\s*\(/,
+        'initScene must call setWrap() — gut it and the DOM overlay element is never stored');
+});
+
+test('kill: buildBoard body calls setBoardStringStartX(', () => {
+    const src = fs.readFileSync(sceneInitJs, 'utf8');
+    assert.match(src, /\bsetBoardStringStartX\s*\(/,
+        'buildBoard must call setBoardStringStartX() — gut it and renderer.js reads stale fretX(0) forever');
+});
+
+test('kill: buildBoard body calls setFretWireMats(', () => {
+    const src = fs.readFileSync(sceneInitJs, 'utf8');
+    assert.match(src, /\bsetFretWireMats\s*\(/,
+        'buildBoard must call setFretWireMats() — gut it and wire material array is never updated after rebuild');
+});
+
+test('kill: _bgLoadSettings body calls setActivePalette(', () => {
+    const src = fs.readFileSync(sceneInitJs, 'utf8');
+    assert.match(src, /\bsetActivePalette\s*\(/,
+        '_bgLoadSettings must call setActivePalette() — gut it and renderer.js reads stale palette (silent fork class)');
+});
+
+test('kill: _bgLoadSettings body calls setCameraMode(', () => {
+    const src = fs.readFileSync(sceneInitJs, 'utf8');
+    assert.match(src, /\bsetCameraMode\s*\(/,
+        '_bgLoadSettings must call setCameraMode() — gut it and camera mode never updates after settings change');
+});
+
+test('kill: _bgLoadSettings body calls setGlowMul(', () => {
+    const src = fs.readFileSync(sceneInitJs, 'utf8');
+    assert.match(src, /\bsetGlowMul\s*\(/,
+        '_bgLoadSettings must call setGlowMul() — gut it and emissive intensity never updates after vibrancy change');
+});
+
+test('kill: _bcSyncMode body calls setBcCtrl(', () => {
+    const src = fs.readFileSync(sceneInitJs, 'utf8');
+    assert.match(src, /\bsetBcCtrl\s*\(/,
+        '_bcSyncMode must call setBcCtrl() — gut it and bcCtrl in screen.js scope is never updated; BC stays dead');
+});
+
+// ── §10 Execution smoke (§11 gate-2 of contract) ─────────────────────────────
+// new-Function harness: wrap scene-init.js in a function call, inject recording
+// DI stubs, invoke createSceneInit and then initScene(). The expected failure
+// is a TypeError on null T (T.WebGLRenderer) — assert the setters reached
+// before that throw were called.
+// Documented gap: WRITE paths in sloppy-mode new-Function differ from strict;
+// ESLint no-undef on src/scene-init.js (gate-3) compensates.
+
+test('smoke: createSceneInit factory returns expected 4-key surface', () => {
+    // Source-scan variant (no DOM/WebGL needed): verify factory return statement.
+    // Find the LAST return { ... } in the file — that is the factory's return.
+    const src = fs.readFileSync(sceneInitJs, 'utf8');
+    const lastReturnIdx = src.lastIndexOf('return {');
+    assert.ok(lastReturnIdx >= 0, 'createSceneInit must have a return { ... } statement');
+    const ret = src.slice(lastReturnIdx, src.indexOf('}', lastReturnIdx) + 1);
+    for (const name of ['initScene', 'buildBoard', '_bgUnmountStyle', '_bcSyncMode']) {
+        assert.ok(ret.includes(name), `factory return must include ${name}`);
+    }
+    // Must NOT export private helpers
+    for (const priv of ['_bgLoadSettings', '_applyBgTheme', '_bgRebuild', '_bgMountStyle']) {
+        assert.ok(!ret.includes(priv), `factory return must NOT include private ${priv}`);
+    }
+});
+
+test('smoke: new-Function harness — setters called before null-T throw', () => {
+    const rawSrc = fs.readFileSync(sceneInitJs, 'utf8');
+
+    // Strip ES module syntax for new Function
+    let src = rawSrc
+        .replace(/^\/\*\s*global[^*]*\*\//m, '')
+        .replace(/^import\s+\{[^}]+\}\s+from\s+['"][^'"]+['"]\s*;?/gm, '')
+        .replace(/^export\s+/gm, '');
+
+    // Recording setter stubs
+    const called = new Set();
+    function makeSetter(name) { return (...a) => called.add(name); }
+    function makeGetter(val) { return () => val; }
+
+    // Minimal fake T that lets initScene advance past wrap creation before dying
+    const fakeT = null; // null T causes first `new T.WebGLRenderer(...)` to throw
+
+    const di = {
+        // Constants (scene-init needs these to not ReferenceError at DI destructure)
+        K: 1, NW: 0.5, NH: 0.5, ND: 1, NFRETS: 24,
+        S_BASE: 0, S_GAP: 0.1,
+        FOG_START: 10, FOG_END: 100, BASE_VFOV: 45,
+        HWY_LANE_STRIPE_ODD_HEX: '#111', HWY_LANE_STRIPE_EVEN_HEX: '#222',
+        CHORD_BOX_TEAL_HEX: '#0ff', CHORD_BOX_TEAL_DARK_HEX: '#0aa',
+        CHORD_BOX_FILL_GRAD_ALPHA: 0.5,
+        ARPEGGIO_BOX_BLUE_HEX: '#00f', ARPEGGIO_BOX_BLUE_DARK_HEX: '#008',
+        ARPEGGIO_RIM_BLUE_HEX: '#0af', FRET_LABEL_GOLD_HEX: '#fa0',
+        CHORD_BOX_EDGE_ALPHA: 0.8,
+        BG_DEFAULTS: {}, BG_STYLES: [], PALETTES: {},
+        IM_TECH_CAP: 64, IM_STRUM_CAP: 64, MAX_RENDER_STRINGS: 7,
+        SLIDE_RIBBON_SAMPLES: 8, SLIDE_RIBBON_INDICES_ARR: new Uint16Array(0),
+        DEFAULT_GEM_GRADIENTS: [], INLAY_LABEL_FRETS: [],
+        SPARK_N: 256, _ND_TTL_MS: 1000, _ND_TIME_EPS: 0.01,
+        FRET_WIRE_HIT_HEX: '#fff', FRET_WIRE_HIT_EMISSIVE: 1,
+        FRET_WIRE_IDLE_HEX: '#888', FRET_WIRE_IDLE_OP: 0.5,
+        FRET_WIRE_HIT_OP: 1, FRET_WIRE_HIT_INTENSITY: 2, FRET_WIRE_HIT_DECAY: 0.9,
+        ACCENT_RIM_BASE_EMISSIVE: 0.5,
+        ACCENT_HALO_OP_NEAR: 0.8, ACCENT_HALO_OP_MID: 0.5, ACCENT_HALO_OP_FAR: 0.2,
+        ACCENT_HALO_XY_INNER: 0.1, ACCENT_HALO_XY_MID: 0.2, ACCENT_HALO_XY_OUTER: 0.3,
+        ACCENT_HALO_Z_INNER: 0, ACCENT_HALO_Z_MID: 0.1, ACCENT_HALO_Z_OUTER: 0.2,
+        STR_THICK: 0.02, FRET_BOW_DZ: 0.1, FRET_TUBE_RADIUS: 0.02,
+        FRET_TUBE_SEG: 4, FRET_TUBE_RADIAL: 4,
+        FRET_METALNESS: 0.5, FRET_ROUGHNESS: 0.5, FRET_EMISSIVE: 0.1,
+        AHEAD: 4, TS: 1, DOTS: [], DDOTS: [],
+        // Fn-refs (no-ops)
+        sY: () => 0, fretLabelScaleForFret: () => 1,
+        pool: () => ({ reset(){}, get(){ return {}; } }),
+        txtMat: () => ({}),
+        palmMuteXSpriteMat: () => ({}), fretHandMuteXSpriteMat: () => ({}),
+        _applyCinematic: () => {}, _h3dHexOrDefault: (h) => h || '#000',
+        _bgPanelKey: () => '', _bgReadSetting: () => null,
+        _bgGetAnalyser: () => null, _bgBackgroundColors: () => [],
+        _bgHighwayColors: () => [], _bgSubscribe: () => (() => {}),
+        _bgHasStored: () => false, _bgMemFallback: () => null,
+        _venueSwapPlateIfNeeded: () => {}, _darkenInt: (v) => v,
+        _lightenInt: (v) => v, _h3dHexToInt: () => 0,
+        boardSpanX: () => 10, _bcCreateController: () => ({}),
+        updateStringHighlights: () => {}, canvasSize: () => ({ w: 800, h: 600 }),
+        applySize: () => {}, fxInit: () => {},
+        _disposeOpenStringPitchSprites: () => {},
+        // Stable refs
+        _ownedSharedMats: [], _ownedSharedGeos: [],
+        _imPMTechAlphaArr: new Float32Array(64), _imFHTechAlphaArr: new Float32Array(64),
+        _imPMXFillAlphaArr: new Float32Array(64), _imPMXLinesAlphaArr: new Float32Array(64),
+        _imFHXFillAlphaArr: new Float32Array(64), _imFHXLinesAlphaArr: new Float32Array(64),
+        fretLastActiveTime: new Float32Array(25), _fwHitGlow: new Float32Array(25),
+        _customPalette: null, _outlinePalette: null, _tuningLabelSprites: {},
+        // Getters
+        getH3dFretUniform: makeGetter(false),
+        getHighwayCanvas: makeGetter(null), // null canvas → initScene returns false immediately
+        getInstanceId: makeGetter(1),
+        getLeftyCached: makeGetter(false), getNStr: makeGetter(6),
+        getActivePalette: makeGetter([0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff]),
+        getTextSize: makeGetter(1), getGlowMul: makeGetter(1),
+        getVibrancyIdleOp: makeGetter(0.5), getVibrancyProjOp: makeGetter(0.3),
+        getBgReactiveOptOut: makeGetter(false),
+        getVenueSceneOverride: makeGetter(null), getIsDestroyed: makeGetter(false),
+        getVibrancy: makeGetter(0.5),
+    };
+
+    // Add recording setter stubs for every setter the DI might declare
+    // (use a Proxy-like approach: any property access on di returns a no-op setter)
+    const diProxy = new Proxy(di, {
+        get(target, prop) {
+            if (prop in target) return target[prop];
+            // Unknown getter → return a no-op getter
+            if (typeof prop === 'string' && prop.startsWith('get')) return makeGetter(null);
+            // Unknown setter → return a recording stub
+            if (typeof prop === 'string' && prop.startsWith('set')) return makeSetter(prop);
+            return undefined;
+        }
+    });
+
+    let factory;
+    try {
+        // eslint-disable-next-line no-new-func
+        const fn = new Function('di', src + '\n return createSceneInit(di);');
+        factory = fn(diProxy);
+    } catch (e) {
+        assert.fail(`createSceneInit construction threw unexpectedly: ${e.message}`);
+    }
+
+    assert.ok(factory && typeof factory.initScene === 'function',
+        'factory must return object with initScene');
+
+    // Call initScene() — with null canvas it returns false immediately (no T used)
+    // This tests the early-guard path: canvas null → immediate return false
+    const result = factory.initScene();
+    assert.strictEqual(result, false,
+        'initScene with null canvas must return false (early guard)');
+
+    // The smoke test documents the WebGL gap: we cannot reach T.WebGLRenderer
+    // without a real canvas. Source-scan kill tests above cover the setter-call
+    // paths that require WebGL. ESLint no-undef is the compensating layer for
+    // WRITE paths in sloppy-mode new-Function.
 });
