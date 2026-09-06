@@ -67,6 +67,23 @@ module.exports = [
             'import-x/no-cycle': 'error',
         },
     },
+    // highway_3d plugin — screen.js uses ES-module syntax (scriptType:module)
+    // so it needs module sourceType to parse. Add no-use-before-define here
+    // (variables: true, functions: false) to catch const/let TDZ violations
+    // inside factory functions across the whole plugin tree.
+    // Proven to flag the broken-tip regression (fix/h3d-viz-init-fallback):
+    //   broken: const sY used at createScoreFx DI before its declaration → ERROR
+    //   fixed:  sY hoisted above createScoreFx call → clean (0 errors)
+    {
+        files: [
+            'plugins/highway_3d/screen.js',
+            'plugins/highway_3d/src/**/*.js',
+        ],
+        languageOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+        rules: {
+            'no-use-before-define': ['error', { variables: true, functions: false }],
+        },
+    },
     // Signed size exemptions (docs/size-exemptions.md) — raise the ceiling so
     // registered files don't warn below it.
     ...SIZE_EXEMPTIONS.map(({ files, max }) => ({ files, rules: { 'max-lines': sizeRule(max) } })),

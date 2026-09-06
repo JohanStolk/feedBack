@@ -247,6 +247,12 @@ let _bcPane = null, _bcListEl = null, _bcFilterEl = null, _bcPaneOpen = false, _
 function _bcStatusMark(name) {
     return _bcFavorites.has(name) ? '★ ' : (_bcBanned.has(name) ? '🚫 ' : '');
 }
+// Hoisted above the functions that reference it so no-use-before-define
+// does not flag closure reads inside _bcSetHold, _bcLayout, _bcSetPane,
+// _bcUpdatePanelPreset. All are closures — _bcPanel is read at call time,
+// not at module-evaluation time. Original declaration was at line ~316.
+let _bcPanel = null, _bcPanelKeyBound = false;
+
 function _bcSetHold(v) {
     const s = _bcLoadSettings();
     s.hold = !!v; _bcSaveSettings();
@@ -313,7 +319,7 @@ function _bcUpdatePanelPreset() {
     if (_bcPaneOpen) _bcRenderList();
 }
 
-let _bcPanel = null, _bcPanelKeyBound = false;
+// _bcPanel hoisted to before _bcSetHold — see comment there.
 function _bcEnsurePanel(host) {
     if (_bcPanel && _bcPanel.isConnected) {
         // Singleton panel: follow the active highway. If it's still parented

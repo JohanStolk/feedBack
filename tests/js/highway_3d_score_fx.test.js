@@ -462,3 +462,47 @@ test('createScoreFx({...}) wiring has correct naming correspondence (no param sw
 
     assert.deepEqual(violations, [], 'createScoreFx wiring violations found');
 });
+
+// ── TDZ regression guard (fix/h3d-viz-init-fallback) ────────────────────────
+// Input that FAILS at broken tip: calling window.feedBackViz_highway_3d()
+// (i.e. createFactory()) throws ReferenceError: Cannot access 'sY' before
+// initialization — const sY was declared 371 lines AFTER createScoreFx({...,
+// sY}), putting sY in the temporal dead zone on every factory invocation.
+// Result: viz picker fell back to 2D immediately; THREE.js never requested.
+//
+// Guard: ESLint no-use-before-define (variables:true, functions:false) scoped
+// over screen.js and src/ — statically flags ANY const/let used before its
+// declaration in the factory, catching the entire class not just this pair.
+// At the broken tip this rule errors on sY; after the fix it is clean.
+// Prefer this semantic gate over source-scan byte-offset comparisons, which
+// miss TDZ bugs invisible to regex (this was the FOURTH such break).
+test('no-use-before-define gate is clean on highway_3d screen.js and src/ (fix/h3d-viz-init-fallback)', () => {
+    const { execSync } = require('node:child_process');
+    const repoRoot = path.join(__dirname, '..', '..');
+    let stdout;
+    try {
+        stdout = execSync(
+            'npx --yes eslint@9.39.4 --format json plugins/highway_3d/screen.js plugins/highway_3d/src/',
+            { cwd: repoRoot, encoding: 'utf8' },
+        );
+    } catch (err) {
+        // eslint exits non-zero when errors exist; output is still on stdout.
+        stdout = err.stdout || '';
+    }
+    const results = JSON.parse(stdout);
+    const tdzErrors = [];
+    for (const file of results) {
+        for (const msg of file.messages) {
+            if (msg.ruleId === 'no-use-before-define' && msg.severity === 2) {
+                tdzErrors.push(`${path.relative(repoRoot, file.filePath)}:${msg.line} — ${msg.message}`);
+            }
+        }
+    }
+    assert.deepEqual(
+        tdzErrors,
+        [],
+        'no-use-before-define errors found in highway_3d — a const/let is used before its ' +
+        'declaration in the factory (real TDZ risk). At the broken tip, sY was used in ' +
+        'createScoreFx({..., sY}) 371 lines before its declaration.\n' + tdzErrors.join('\n'),
+    );
+});

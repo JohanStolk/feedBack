@@ -3221,6 +3221,10 @@ import { createSceneInit } from './src/scene-init.js'; // h3d-carve-16
         // — never a per-frame querySelector (see CLAUDE.md "never run DOM queries
         // on a per-frame path") — and re-resolved only when a node detaches.
         let _v3HudEls = null;
+        // Hoisted above _v3TopRightChromeBottom so the function body reference
+        // is not flagged by no-use-before-define (closure false positive — read
+        // only at call time; original declaration was near the lifecycle flags).
+        let highwayCanvas = null;
         // Returns the bottom edge (in overlay-canvas px, which are 1:1 CSS px on
         // this overlay) of the lowest visible top-right v3 chrome element, or 0
         // when none apply (classic v2 UI, or all hidden). Only called while the
@@ -3607,6 +3611,25 @@ import { createSceneInit } from './src/scene-init.js'; // h3d-carve-16
         // silent — see the live-latch handling in the per-gem loop below).
         let _susVerdictLatch = new Map();
 
+        // ── String-to-Y (respects invert) ─────────────────────────────────
+        // Declared here so createScoreFx (carve-10) can receive a direct
+        // sY reference; the original declaration at carve-6 was after the
+        // carve-10 block, putting sY in TDZ when createScoreFx read it.
+        //
+        // _invertedCached and nStr are hoisted here from their original
+        // positions (lifecycle flags and per-frame state blocks below) so
+        // the sY arrow body and the DI getter arrows in createScoreFx are
+        // not flagged by no-use-before-define. Both read these bindings
+        // only at call time (closure), never at factory-init time.
+        let _invertedCached = false;
+        // Active string count for the current arrangement (resolved each
+        // frame from bundle.stringCount and clamped to MAX_RENDER_STRINGS).
+        let nStr = NSTR;
+        // curX hoisted for the getCurX DI getter arrow below (closure, read
+        // at call time). Initial value assigned later at xFretMid init.
+        let curX;
+        const sY = s => S_BASE + (_invertedCached ? s : (nStr - 1 - s)) * S_GAP;
+
         /* ── h3d-carve-10: K-section (score FX) → src/score-fx.js ──────── */
         const { fxInit, fxTeardown, fxSpawnPop: _fxSpawnPop, drawScoreFx, fxClearSeen } = createScoreFx({
             getHighwayCanvas: () => highwayCanvas,
@@ -3699,9 +3722,6 @@ import { createSceneInit } from './src/scene-init.js'; // h3d-carve-16
         // Per-fret last-active timestamp for lane persistence
         let fretLastActiveTime = new Array(NFRETS + 1).fill(0);
 
-        // Active string count for the current arrangement (resolved each
-        // frame from bundle.stringCount and clamped to MAX_RENDER_STRINGS).
-        let nStr = NSTR;
         // Set true once a chart with out-of-range s indices has triggered
         // its warning. Reset only on teardown or when nStr changes (e.g.
         // arrangement switch from guitar to bass) — same-nStr songs share
@@ -3866,7 +3886,7 @@ import { createSceneInit } from './src/scene-init.js'; // h3d-carve-16
             };
         };
 
-        let tgtX = xFretMid(CAM_LOCK_CENTER_FRET), curX = xFretMid(CAM_LOCK_CENTER_FRET);
+        let tgtX = xFretMid(CAM_LOCK_CENTER_FRET); curX = xFretMid(CAM_LOCK_CENTER_FRET); // curX declared above (DI hoisting)
         let tgtDist = CAM_DIST_BASE, curDist = CAM_DIST_BASE;
         // Dolly-back multiplier applied to the curDist lerp target by camUpdate's
         // fret-row fit guard. 1 = no extra pull-back (the common case); rises
@@ -3958,11 +3978,11 @@ import { createSceneInit } from './src/scene-init.js'; // h3d-carve-16
         // Lifecycle flags
         let _isReady = false;
         let _destroyed = false;
-        let _invertedCached = false;
+        // _invertedCached hoisted to before sY — see comment there.
         let _invertedForBoard = false;
         let _leftyForBoard = false;
         let _initToken = 0;
-        let highwayCanvas = null;
+        // highwayCanvas hoisted to before _v3TopRightChromeBottom — see comment there.
 
         // ── Focus state (splitscreen dim) ─────────────────────────────────
         let _focusSubscribed = false;
@@ -3984,9 +4004,6 @@ import { createSceneInit } from './src/scene-init.js'; // h3d-carve-16
             if (ambLight) ambLight.intensity = focused ? 0.85 : 0.4;
             if (dirLight) dirLight.intensity = focused ? 0.8 : 0.35;
         }
-
-        // ── String-to-Y (respects invert) ─────────────────────────────────
-        const sY = s => S_BASE + (_invertedCached ? s : (nStr - 1 - s)) * S_GAP;
 
         // ── h3d-carve-6: material builders ───────────────────────────────────
         // TXT_STYLES, txtMat, pinchHarmonicMat, naturalHarmonicMat,
