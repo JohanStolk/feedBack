@@ -15,6 +15,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
+const SCENE_INIT_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'scene-init.js'); // h3d-carve-16
 // h3d-carve-6: pool() moved to src/materials.js; warm() call-sites remain in screen.js.
 const MATERIALS_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'materials.js');
 
@@ -65,7 +66,7 @@ test('pool.warm coerces cap to a non-negative integer', () => {
 });
 
 test('warm() is called at boardInit with renderer-scoped cap constants', () => {
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(SCENE_INIT_JS, 'utf8');
     // The note / chord / lane / beat cap constants live inside the
     // boardInit/initScene path (renderer-instance scope, not module
     // scope); each must exist as a const and drive at least one .warm()

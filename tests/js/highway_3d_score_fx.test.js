@@ -15,7 +15,8 @@ const path = require('node:path');
 const SCREEN_JS   = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
 const SCORE_FX_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'score-fx.js');
 
-const src       = fs.readFileSync(SCREEN_JS,   'utf8');
+const SCENE_INIT_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'scene-init.js'); // h3d-carve-16
+const src       = fs.readFileSync(SCREEN_JS,   'utf8') + '\n' + fs.readFileSync(SCENE_INIT_JS, 'utf8');
 const scoreFxSrc = fs.readFileSync(SCORE_FX_JS, 'utf8');
 
 // ── Module shape ────────────────────────────────────────────────────────────

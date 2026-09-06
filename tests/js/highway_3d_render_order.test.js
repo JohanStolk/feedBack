@@ -47,6 +47,7 @@ const GEOMETRY_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 's
 // h3d-carve-14: V-section moved to note-renderer.js; renderOrder tests must
 // search both files.
 const NOTE_RENDERER_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'note-renderer.js');
+const SCENE_INIT_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'scene-init.js'); // h3d-carve-16
 const RENDERER_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'renderer.js');
 
 // ---------------------------------------------------------------------------
@@ -59,7 +60,8 @@ function src() {
     if (!_src) {
         _src = fs.readFileSync(SCREEN_JS, 'utf8')
              + '\n' + fs.readFileSync(NOTE_RENDERER_JS, 'utf8')
-             + '\n' + fs.readFileSync(RENDERER_JS, 'utf8');
+             + '\n' + fs.readFileSync(RENDERER_JS, 'utf8')
+             + '\n' + fs.readFileSync(SCENE_INIT_JS, 'utf8'); // h3d-carve-16
     }
     return _src;
 }
@@ -140,7 +142,8 @@ test('board-projection frame mesh uses renderOrder 14', () => {
     // Anchor to the board-projection pool (projMeshArr = activePalette.map(...))
     // so the assertion only passes when THAT block seeds renderOrder = 14 —
     // not any unrelated renderOrder = 14 elsewhere in the source.
-    const boardProjRO = /projMeshArr\s*=\s*activePalette\.map\b[\s\S]{0,1200}?m\.renderOrder\s*=\s*14\s*;/;
+    // h3d-carve-16: DI form uses setProjMeshArr(getActivePalette().map(...))
+    const boardProjRO = /(?:projMeshArr\s*=\s*activePalette|setProjMeshArr\s*\(\s*getActivePalette\s*\(\s*\)\s*)\.map\b[\s\S]{0,1200}?m\.renderOrder\s*=\s*14\s*;/;
     assert.match(
         src(),
         boardProjRO,
@@ -189,9 +192,10 @@ test('static fret wires use bowed TubeGeometry + MeshStandardMaterial, named boa
         /FRET_BOW_DZ\s*\*\s*zm/,
         'fret tube path must bow in Z by FRET_BOW_DZ so the neck reads as curved',
     );
+    // h3d-carve-16: DI form uses getFretTubeGeo() getter
     assert.match(
         s,
-        /new\s+T\.Mesh\(\s*fretTubeGeo\s*,\s*mat\s*\)/,
+        /new\s+T\.Mesh\(\s*(?:fretTubeGeo|getFretTubeGeo\(\))\s*,\s*mat\s*\)/,
         'buildBoard fret wires must reuse the shared fretTubeGeo (not T.Line)',
     );
     assert.match(

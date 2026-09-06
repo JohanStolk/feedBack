@@ -14,22 +14,26 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
-const src = fs.readFileSync(SCREEN_JS, 'utf8');
+const SCENE_INIT_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'scene-init.js'); // h3d-carve-16
+const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(SCENE_INIT_JS, 'utf8');
 
 test('binds webglcontextlost + webglcontextrestored on the renderer canvas', () => {
-    assert.match(src, /ren\.domElement\.addEventListener\(\s*['"]webglcontextlost['"]/,
+    // h3d-carve-16: DI form uses getRen().domElement instead of ren.domElement
+    assert.match(src, /(?:getRen\(\)|ren)\.domElement\.addEventListener\(\s*['"]webglcontextlost['"]/,
         'must listen for webglcontextlost on ren.domElement (the WebGL canvas)');
-    assert.match(src, /ren\.domElement\.addEventListener\(\s*['"]webglcontextrestored['"]/,
+    assert.match(src, /(?:getRen\(\)|ren)\.domElement\.addEventListener\(\s*['"]webglcontextrestored['"]/,
         'must listen for webglcontextrestored on ren.domElement');
 });
 
 test('the context-lost handler preventDefaults and pauses drawing', () => {
     // Without preventDefault() the browser will not attempt to restore the
     // context and the loss can escalate to a renderer crash.
-    const m = src.match(/_onCtxLost\s*=\s*\(e\)\s*=>\s*\{[\s\S]*?\};/);
+    // h3d-carve-16: DI form uses setOnCtxLost((e) => instead of _onCtxLost = (e) =>
+    const m = src.match(/(?:_onCtxLost\s*=\s*|setOnCtxLost\()\s*\(e\)\s*=>\s*\{[\s\S]*?\}\s*[;)]/);
     assert.ok(m, '_onCtxLost handler must exist');
     assert.match(m[0], /preventDefault\(\)/, 'context-lost handler must call preventDefault()');
-    assert.match(m[0], /_ctxLost\s*=\s*true/, 'context-lost handler must set _ctxLost = true');
+    // h3d-carve-16: DI form uses setCtxLost(true) instead of _ctxLost = true
+    assert.match(m[0], /(?:setCtxLost\(true\)|_ctxLost\s*=\s*true)/, 'context-lost handler must set _ctxLost = true');
 });
 
 test('draw() early-returns while the context is lost', () => {

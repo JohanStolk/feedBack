@@ -18,6 +18,7 @@ const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
 const GEOMETRY_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'geometry.js');
+const SCENE_INIT_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'scene-init.js'); // h3d-carve-16
 
 test('a gaussian DataTexture helper (_makeGaussTex) drives the bloom falloff', () => {
     const geo = fs.readFileSync(GEOMETRY_JS, 'utf8');
@@ -26,7 +27,7 @@ test('a gaussian DataTexture helper (_makeGaussTex) drives the bloom falloff', (
         /export\s+function\s+_makeGaussTex\s*\(/,
         '_makeGaussTex must be exported from geometry.js to build the bloom gaussian texture',
     );
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(SCENE_INIT_JS, 'utf8');
     assert.match(
         src,
         /_bloomGaussTex\s*=\s*_makeGaussTex\(/,
@@ -35,10 +36,11 @@ test('a gaussian DataTexture helper (_makeGaussTex) drives the bloom falloff', (
 });
 
 test('the bloom rail material uses additive blending', () => {
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(SCENE_INIT_JS, 'utf8');
+    // h3d-carve-16: DI form uses _mSusRailBloomBase (local alias)
     assert.match(
         src,
-        /mSusRailBloomBase\s*=\s*new\s+T\.MeshBasicMaterial\(\{[\s\S]*?blending:\s*T\.AdditiveBlending[\s\S]*?\}\)/,
+        /(?:_m)?SusRailBloomBase\s*=\s*new\s+T\.MeshBasicMaterial\(\{[\s\S]*?blending:\s*T\.AdditiveBlending[\s\S]*?\}\)/,
         'mSusRailBloomBase must blend additively so it brightens what is behind it',
     );
 });
@@ -46,10 +48,11 @@ test('the bloom rail material uses additive blending', () => {
 test('the bloom pool seeds meshes at renderOrder 4, behind the core rail (5)', () => {
     // renderOrder 4 keeps the bloom behind the core sustain rail (5) so the
     // glow reads as a trail rather than occluding the rail.
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(SCENE_INIT_JS, 'utf8');
+    // h3d-carve-16: DI form uses _pSusRailBloom (local alias); pool first arg may be a getter call
     assert.match(
         src,
-        /pSusRailBloom\s*=\s*pool\([^)]*,\s*\(\)\s*=>\s*\{[\s\S]*?m\.renderOrder\s*=\s*4\s*;[\s\S]*?\}\s*\)/,
+        /(?:_p)?SusRailBloom\s*=\s*pool\([\s\S]{0,100}?,\s*\(\)\s*=>\s*\{[\s\S]*?m\.renderOrder\s*=\s*4\s*;[\s\S]*?\}\s*\)/,
         'pSusRailBloom pool must seed meshes with renderOrder = 4',
     );
 });

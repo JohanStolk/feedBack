@@ -18,9 +18,10 @@ const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
 const GEOMETRY_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'geometry.js');
+const SCENE_INIT_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'scene-init.js'); // h3d-carve-16
 
 test('fret-spacing mode is read from the highway_3d.fretSpacing localStorage key', () => {
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(SCENE_INIT_JS, 'utf8');
     assert.match(
         src,
         /_h3dFretUniform\s*=\s*localStorage\.getItem\(\s*'highway_3d\.fretSpacing'\s*\)\s*!==\s*'logarithmic'/,
@@ -29,7 +30,7 @@ test('fret-spacing mode is read from the highway_3d.fretSpacing localStorage key
 });
 
 test('fretX is a 1-arg delegator to geoFretX in screen.js (h3d-carve-1)', () => {
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(SCENE_INIT_JS, 'utf8');
     assert.match(
         src,
         /const\s+fretX\s*=\s*f\s*=>\s*geoFretX\(\s*f\s*,\s*_h3dFretUniform\s*\)/,
@@ -46,7 +47,7 @@ test('fretX is a 1-arg delegator to geoFretX in screen.js (h3d-carve-1)', () => 
 test('h3dSetFretSpacing validates the mode against the two supported values', () => {
     // An unexpected input must not be persisted verbatim — it is coerced to
     // one of 'logarithmic' | 'uniform' before writing to localStorage.
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(SCENE_INIT_JS, 'utf8');
     assert.match(
         src,
         /window\.h3dSetFretSpacing\s*=\s*mode\s*=>\s*\{[\s\S]*?mode\s*===\s*'logarithmic'\s*\?\s*'logarithmic'\s*:\s*'uniform'[\s\S]*?localStorage\.setItem\(\s*'highway_3d\.fretSpacing'/,
@@ -60,7 +61,7 @@ test('h3dSetFretSpacing applies the change live, not via a page reload', () => {
     // a 'fretSpacing' change so mounted panels rebuild in place — same path as
     // every other 3D-highway setting. Reintroducing location.reload() here is
     // the regression this guards against.
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(SCENE_INIT_JS, 'utf8');
     const setter = src.match(/window\.h3dSetFretSpacing\s*=\s*mode\s*=>\s*\{[\s\S]*?\n    \};/);
     assert.ok(setter, 'h3dSetFretSpacing assignment must be present');
     assert.doesNotMatch(
@@ -76,10 +77,11 @@ test('h3dSetFretSpacing applies the change live, not via a page reload', () => {
 });
 
 test('the fretSpacing change rebuilds a mounted board live', () => {
-    const src = fs.readFileSync(SCREEN_JS, 'utf8');
+    const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(SCENE_INIT_JS, 'utf8');
+    // h3d-carve-16: DI form uses getFretG() getter
     assert.match(
         src,
-        /changedKey\s*===\s*'fretSpacing'[\s\S]*?if\s*\(fretG\)\s*buildBoard\(\)/,
+        /changedKey\s*===\s*'fretSpacing'[\s\S]*?if\s*\((?:fretG|getFretG\(\))\)\s*buildBoard\(\)/,
         'the panel bg listener must rebuild the board when fretSpacing changes',
     );
 });

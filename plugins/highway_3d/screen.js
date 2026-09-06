@@ -20,6 +20,7 @@ import { createStringGlow } from './src/string-glow.js'; // h3d-carve-11
 import { createArp } from './src/arp.js'; // h3d-carve-12
 import { createNoteRenderer } from './src/note-renderer.js'; // h3d-carve-14
 import { createRenderer } from './src/renderer.js'; // h3d-carve-15
+import { createSceneInit } from './src/scene-init.js'; // h3d-carve-16
 
 (function () {
     'use strict';
@@ -4212,2012 +4213,7 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
             createOverlay({ diagRenderCache: _diagRenderCache });
 
         /* ── Scene initialisation ─────────────────────────────────────────── */
-        function initScene() {
-            if (!highwayCanvas || !highwayCanvas.parentNode) {
-                console.error('[3D-Hwy] initScene: canvas has no parent; aborting');
-                return false;
-            }
-
-            // Reset per-song lane state
-            fretLastActiveTime.fill(0);
-
-            wrap = document.createElement('div');
-            wrap.id = 'h3d-wrap-' + _instanceId;
-            wrap.className = 'h3d-wrap';
-            wrap.dataset.h3dInstance = String(_instanceId);
-            wrap.style.cssText = 'position:absolute;top:0;left:0;right:0;z-index:2;pointer-events:none;';
-            // Mark this instance as the primary tour target so the tour engine
-            // always spotlights a unique element (selector '.h3d-wrap[data-h3d-primary]')
-            // rather than the first of potentially many splitscreen wraps.
-            document.querySelectorAll('.h3d-wrap[data-h3d-primary]').forEach(
-                el => el.removeAttribute('data-h3d-primary'));
-            wrap.setAttribute('data-h3d-primary', '');
-            highwayCanvas.parentNode.insertBefore(wrap, highwayCanvas.nextSibling);
-
-            // Subscribe to highway:visibility (feedBack#246) so the
-            // .h3d-wrap overlay hides in sync with the feedBack canvas.
-            // The wrap is a sibling of #highway, so display:none on
-            // #highway leaves us painting full-screen otherwise.
-            // Guarded lazy bind: tolerate hosts that don't yet expose
-            // feedBack.on/off (older feedBack versions, headless
-            // tests).
-            if (window.feedBack
-                && typeof window.feedBack.on === 'function'
-                && typeof window.feedBack.off === 'function') {
-                _visibilityHandler = (e) => {
-                    if (!wrap) return;
-                    // Filter by canvas identity (splitscreen-safe).
-                    // Each createHighway() instance emits its own
-                    // visibility events on the shared feedBack bus —
-                    // without this gate, one hidden panel would also
-                    // hide every other panel's 3D overlay.
-                    if (!e || !e.detail || e.detail.canvas !== highwayCanvas) return;
-                    const v = e.detail.visible;
-                    wrap.style.display = v === false ? 'none' : '';
-                };
-                try {
-                    window.feedBack.on('highway:visibility', _visibilityHandler);
-                } catch (e) {
-                    _visibilityHandler = null;
-                }
-                // Track canvas-replaced so the visibility handler's
-                // identity gate continues to match after core swaps the
-                // <canvas> element for a context-type change.
-                _canvasReplacedHandler = (e) => {
-                    if (!e || !e.detail) return;
-                    // Only update if the swap involves OUR canvas — in
-                    // splitscreen each panel has its own canvas.
-                    if (e.detail.oldCanvas !== highwayCanvas) return;
-                    highwayCanvas = e.detail.newCanvas;
-                    // Re-sync wrap visibility from the new canvas in
-                    // case its initial displayed-state differs.
-                    if (wrap) {
-                        const v = highwayCanvas && highwayCanvas.offsetParent !== null;
-                        wrap.style.display = v ? '' : 'none';
-                    }
-                };
-                try {
-                    window.feedBack.on('highway:canvas-replaced', _canvasReplacedHandler);
-                } catch (e) {
-                    _canvasReplacedHandler = null;
-                }
-                // Sync once at bind time: the event is transition-only,
-                // so if the canvas was already hidden when we mounted
-                // (e.g. plugin loaded while splitscreen was active),
-                // we'd never receive an emit and would leave the wrap
-                // visible. Compute from the local highwayCanvas (not
-                // window.highway.isVisible) so splitscreen panels get
-                // their own per-instance answer instead of inheriting
-                // the main highway's state.
-                if (_visibilityHandler) {
-                    try {
-                        const initialVisible = highwayCanvas
-                            && highwayCanvas.offsetParent !== null;
-                        wrap.style.display = initialVisible ? '' : 'none';
-                    } catch (e) { /* ignore — initial sync is best-effort */ }
-                }
-            }
-
-            // powerPreference hints the platform to use the discrete /
-            // high-performance GPU and a higher power profile for this WebGL
-            // context. On laptops / iGPU+dGPU machines (Windows, macOS) it
-            // steers GPU selection to the dGPU; on single-dGPU desktops it
-            // requests the high-performance power profile. (It does not by
-            // itself force NVIDIA's utilisation-driven clock ramp on Linux.)
-            ren = new T.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', alpha: true });
-            _probe = new T.Vector3();
-            ren.setClearColor(0x101820, _bcActive() ? 0 : 1);
-            wrap.appendChild(ren.domElement);
-
-            // WebGL context-loss recovery (see the _ctxLost declaration). Bound
-            // on Three's own canvas — the context that actually resets on a GPU
-            // reset / alt-tab. preventDefault() keeps the context restorable
-            // instead of letting the loss escalate to a render-process crash;
-            // _ctxLost then makes draw() bail so no GL work runs on the dead
-            // context; on restore we reset the viewport and resume (Three
-            // re-uploads geometry/materials/textures lazily on the next render).
-            _onCtxLost = (e) => {
-                if (e && typeof e.preventDefault === 'function') e.preventDefault();
-                _ctxLost = true;
-                console.warn('[3D-Hwy] WebGL context lost — pausing render until it is restored.');
-            };
-            _onCtxRestored = () => {
-                _ctxLost = false;
-                console.warn('[3D-Hwy] WebGL context restored — resuming render.');
-                try { const s = canvasSize(highwayCanvas); if (s.w > 0 && s.h > 0) applySize(s.w, s.h); } catch (err) {}
-            };
-            ren.domElement.addEventListener('webglcontextlost', _onCtxLost, false);
-            ren.domElement.addEventListener('webglcontextrestored', _onCtxRestored, false);
-
-            lyricsCanvas = document.createElement('canvas');
-            lyricsCanvas.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;z-index:1;';
-            lyricsCtx = lyricsCanvas.getContext('2d');
-            wrap.appendChild(lyricsCanvas);
-
-            scene = new T.Scene();
-            scene.fog = new T.Fog(0x101820, FOG_START * 0.8, FOG_END * 1.2);
-
-            cam = new T.PerspectiveCamera(BASE_VFOV, 1, 0.01, FOG_END * 3);
-
-            ambLight = new T.AmbientLight(0xffffff, 0.85);
-            scene.add(ambLight);
-            dirLight = new T.DirectionalLight(0xffffff, 0.8);
-            dirLight.position.set(40 * K, 120 * K, 80 * K);
-            scene.add(dirLight);
-            _applyCinematic();
-
-            fretG = new T.Group(); scene.add(fretG);
-            tuningLblG = new T.Group(); scene.add(tuningLblG);
-            noteG = new T.Group(); scene.add(noteG);
-            // Hit sparks (#3): a pooled additive Points cloud; a small burst fires at a
-            // gem on a verified hit (spawned in the verdict block, advanced in the render loop).
-            _sparkPos = new Float32Array(_SPARK_N * 3); _sparkCol = new Float32Array(_SPARK_N * 3);
-            _sparkVel = new Float32Array(_SPARK_N * 3); _sparkLife = new Float32Array(_SPARK_N);
-            {
-                const sg = new T.BufferGeometry();
-                sg.setAttribute('position', new T.BufferAttribute(_sparkPos, 3).setUsage(T.DynamicDrawUsage));
-                sg.setAttribute('color', new T.BufferAttribute(_sparkCol, 3).setUsage(T.DynamicDrawUsage));
-                const sm = new T.PointsMaterial({ size: 1.0 * K, vertexColors: true, transparent: true, opacity: 0.8, depthWrite: false, blending: T.AdditiveBlending, sizeAttenuation: true });
-                _sparkPts = new T.Points(sg, sm); _sparkPts.frustumCulled = false; _sparkPts.renderOrder = 8;
-                scene.add(_sparkPts);
-            }
-            beatG = new T.Group(); scene.add(beatG);
-            lblG = new T.Group(); scene.add(lblG);
-
-            // Rectangular note geometry
-            gNote = new T.BoxGeometry(NW, NH, ND);
-            // Per-string vertical gradient gems — colours sampled from the
-            // original colour PNGs (top highlight → deeper bottom). Each gradient
-            // string gets its own BoxGeometry clone carrying a per-vertex colour
-            // attribute; the gem core swaps to gNoteGrad[s] in drawNote while its
-            // material (mStr[s]) is white + vertexColors:true so the gradient
-            // shows pure. Strings 6/7 have no entry and fall back to flat gNote.
-            gNoteGrad = DEFAULT_GEM_GRADIENTS.map(([topHex, botHex]) => {
-                const g = new T.BoxGeometry(NW, NH, ND);
-                const _pos = g.attributes.position;
-                const _colors = new Float32Array(_pos.count * 3);
-                const _topCol = new T.Color(topHex);
-                const _botCol = new T.Color(botHex);
-                const _tmpCol = new T.Color();
-                const _halfH = NH / 2;
-                for (let i = 0; i < _pos.count; i++) {
-                    const t = (_pos.getY(i) + _halfH) / (2 * _halfH); // 0 bottom..1 top
-                    _tmpCol.copy(_botCol).lerp(_topCol, t);
-                    _colors[i * 3] = _tmpCol.r;
-                    _colors[i * 3 + 1] = _tmpCol.g;
-                    _colors[i * 3 + 2] = _tmpCol.b;
-                }
-                g.setAttribute('color', new T.BufferAttribute(_colors, 3));
-                _ownedSharedGeos.push(g);
-                return g;
-            });
-            // Seed gem colors from whatever palette is active at mount (custom
-            // colors recolor the gem bodies just like the strings/trails).
-            _recolorGemGradients();
-
-            /** Filled ring matching flying-note outline (1.1) minus core (1.0); hollow centre. */
-            function mkGhostFrameGeometry() {
-                const ow = NW * 1.1;
-                const oh = NH * 1.1;
-                const iw = NW;
-                const ih = NH;
-                const depth = ND * 2.8;
-                const shape = new T.Shape();
-                shape.moveTo(-ow / 2, -oh / 2);
-                shape.lineTo(-ow / 2, oh / 2);
-                shape.lineTo(ow / 2, oh / 2);
-                shape.lineTo(ow / 2, -oh / 2);
-                shape.lineTo(-ow / 2, -oh / 2);
-                const hole = new T.Path();
-                hole.moveTo(-iw / 2, -ih / 2);
-                hole.lineTo(iw / 2, -ih / 2);
-                hole.lineTo(iw / 2, ih / 2);
-                hole.lineTo(-iw / 2, ih / 2);
-                hole.lineTo(-iw / 2, -ih / 2);
-                shape.holes.push(hole);
-                const g = new T.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
-                g.translate(0, 0, -depth / 2);
-                return g;
-            }
-
-            gSus = new T.BoxGeometry(1, 1, 1);
-            gBeat = new T.BufferGeometry().setFromPoints(
-                [new T.Vector3(0, 0, 0), new T.Vector3(1, 0, 0)],
-            );
-            // Tap chevron (open V pointing downward) — filled outline for extrusion into a solid mesh
-
-            const chevronShape = new T.Shape();
-
-            // Adjusting points for a "stubby" look
-            // Width: increased to +/- 0.8 for a broader look
-            // Height: capped at 0.2 to make it significantly shorter
-            chevronShape.moveTo(-0.6, 0.3);   // Top left point (further out, lower down)
-            chevronShape.lineTo(0, -0.1);     // Interior vertex (shallower V)
-            chevronShape.lineTo(0.6, 0.3);    // Top right point (further out, lower down)
-
-            chevronShape.lineTo(0.8, 0.0);    // Right outer thickness point
-            chevronShape.lineTo(0, -0.3);     // Bottom vertex / Outer point (less deep)
-            chevronShape.lineTo(-0.8, 0.0);   // Left outer thickness point
-
-            chevronShape.closePath();
-
-            // Create the 3D mesh geometry with a small depth
-            gTapChevron = new T.ExtrudeGeometry(chevronShape, {
-                depth: 0.04 * K,
-                bevelEnabled: false,
-            });
-
-            // Optional: Center the geometry if the pivot point feels off
-            gTapChevron.computeBoundingBox();
-            const centerOffset = -0.5 * (gTapChevron.boundingBox.max.y + gTapChevron.boundingBox.min.y);
-            gTapChevron.translate(0, centerOffset, 0);
-
-            // String materials. Strings 0..5 use a per-vertex gradient (color is
-            // white so the gradient baked into gNoteGrad[s] shows pure); strings
-            // 6/7 keep a flat colour (vertexColors:false ignores the attribute).
-            mStr = activePalette.map((c, i) => new T.MeshBasicMaterial({
-                color: i < 6 ? 0xffffff : c,
-                vertexColors: i < 6,
-                transparent: true, opacity: 1.0,
-            }));
-            mGlow = activePalette.map(c => new T.MeshLambertMaterial({
-                color: 0xffffff, emissive: c, emissiveIntensity: 1.5,
-                transparent: true, opacity: 1.0, depthWrite: false,
-            }));
-            _laneTargetColor = new T.Color(0x4488ff);
-            _fwHitColor = new T.Color(FRET_WIRE_HIT_HEX);
-            _fwHitEmissive = new T.Color(FRET_WIRE_HIT_EMISSIVE);
-            _fwHitGlow.fill(0);
-            _fwHitPrevTime = -Infinity;
-            mSus = activePalette.map(c => new T.MeshLambertMaterial({
-                color: c, transparent: true, opacity: 0.35,
-            }));
-            mWhiteOutline = new T.MeshLambertMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.6, transparent: true, opacity: 1.0, depthWrite: false });
-            const _outlineColors = [0xFF5552, 0xFFF352, 0x31CAFF, 0xFFAE31, 0x84FF42, 0xE639FF];
-            const _outlinePalette = activePalette.map((c, i) => _outlineColors[i] ?? c);
-            mStrHitOutline = _outlinePalette.map(c => new T.MeshLambertMaterial({
-                color: c, emissive: c, emissiveIntensity: 1.0,
-                transparent: true, opacity: 1.0, depthWrite: false,
-            }));
-            // Stronger coloured rim + body for accented notes (.ac); drawNote swaps these in behind ND hit/miss.
-            mAccentOutline = activePalette.map(c => new T.MeshLambertMaterial({
-                color: c, emissive: c, emissiveIntensity: ACCENT_RIM_BASE_EMISSIVE,
-                transparent: true, opacity: 1.0, depthWrite: false,
-            }));
-            // Same colour response as mGlow (vibrancy lerp) but separate emissive drive for extra accent punch.
-            mAccentCore = activePalette.map(c => new T.MeshLambertMaterial({
-                color: 0xffffff, emissive: c, emissiveIntensity: 1.5,
-                transparent: true, opacity: 1.0, depthWrite: false,
-            }));
-            const mkAccentHaloMats = (baseOp) => activePalette.map(c => new T.MeshBasicMaterial({
-                color: new T.Color(c),
-                transparent: true,
-                opacity: baseOp,
-                depthWrite: false,
-                depthTest: true,
-                blending: T.AdditiveBlending,
-                side: T.DoubleSide, forceSinglePass: true,
-                fog: true,
-            }));
-            mAccentHaloNear = mkAccentHaloMats(ACCENT_HALO_OP_NEAR);
-            mAccentHaloMid = mkAccentHaloMats(ACCENT_HALO_OP_MID);
-            mAccentHaloFar = mkAccentHaloMats(ACCENT_HALO_OP_FAR);
-            // Frozen per-string shell descriptors — see _accentShellsByString
-            // declaration. Materials live for the renderer's lifetime, so
-            // these refs stay valid until teardown() clears them.
-            _accentShellsByString = mAccentHaloFar.map((_, s) => Object.freeze([
-                Object.freeze({ mat: mAccentHaloFar[s],  ixy: ACCENT_HALO_XY_OUTER, iz: ACCENT_HALO_Z_OUTER, zK: 0.012 }),
-                Object.freeze({ mat: mAccentHaloMid[s],  ixy: ACCENT_HALO_XY_MID,   iz: ACCENT_HALO_Z_MID,   zK: 0.008 }),
-                Object.freeze({ mat: mAccentHaloNear[s], ixy: ACCENT_HALO_XY_INNER, iz: ACCENT_HALO_Z_INNER, zK: 0.005 }),
-            ]));
-            // Chord/arpeggio frame accent bloom — single gradient bar geometry.
-            // The 4 bloom shells (expand=1.00/1.10/1.25/1.45, op=0.90/0.65/0.38/0.18)
-            // are baked into vertex colours as their additive sum at each Y level,
-            // so one mesh per bar replaces 4 per-shell meshes (16→4 draw calls/chord).
-            // Normalised Y = ±(expand / EXPAND_MAX); EXPAND_MAX = 1.45.
-            // Values > 1.0 in the Float32Array buffer are intentional: WebGL passes
-            // them to the shader unchanged, and additive blending clips naturally.
-            if (!gHaloBar) {
-                // Y levels (normalised): ±(shell_expand / 1.45)
-                //   ±0.690 = shell 1 edge  ±0.759 = shell 2  ±0.862 = shell 3  ±1.0 = shell 4
-                // Brightness = additive sum of all shells covering that band:
-                //   |y| < 0.690 → all 4: 0.90+0.65+0.38+0.18 = 2.11
-                //   |y| < 0.759 → 3 shells: 0.65+0.38+0.18 = 1.21
-                //   |y| < 0.862 → 2 shells: 0.38+0.18 = 0.56
-                //   |y| ≤ 1.000 → shell 4 only: 0.18
-                // prettier-ignore
-                const YS = [-1.000, -0.862, -0.759, -0.690,  0.690, 0.759, 0.862, 1.000];
-                // prettier-ignore
-                const BS = [ 0.18,   0.56,   1.21,   2.11,   2.11,  1.21,  0.56,  0.18 ];
-                const N = YS.length;
-                const pos = new Float32Array(N * 2 * 3);
-                const col = new Float32Array(N * 2 * 3);
-                const idx = new Uint16Array((N - 1) * 6);
-                for (let i = 0; i < N; i++) {
-                    const y = YS[i], b = BS[i];
-                    const li = (i * 2 + 0) * 3, ri = (i * 2 + 1) * 3;
-                    pos[li]=-1; pos[li+1]=y; pos[li+2]=0;
-                    col[li]=b;  col[li+1]=b; col[li+2]=b;
-                    pos[ri]=+1; pos[ri+1]=y; pos[ri+2]=0;
-                    col[ri]=b;  col[ri+1]=b; col[ri+2]=b;
-                }
-                for (let i = 0; i < N - 1; i++) {
-                    const ii = i * 6, v = i * 2;
-                    idx[ii+0]=v+0; idx[ii+1]=v+1; idx[ii+2]=v+3;
-                    idx[ii+3]=v+0; idx[ii+4]=v+3; idx[ii+5]=v+2;
-                }
-                gHaloBar = new T.BufferGeometry();
-                gHaloBar.setAttribute('position', new T.BufferAttribute(pos, 3));
-                gHaloBar.setAttribute('color',    new T.BufferAttribute(col, 3));
-                gHaloBar.setIndex(new T.BufferAttribute(idx, 1));
-            }
-            pHaloBar = pool(noteG, () => new T.Mesh(
-                gHaloBar,
-                new T.MeshBasicMaterial({
-                    vertexColors: true,
-                    transparent: true, opacity: 1.0, depthWrite: false,
-                    blending: T.AdditiveBlending, side: T.DoubleSide, forceSinglePass: true, fog: false,
-                }),
-            ));
-            // Notedetect feedback outline (issue #9): hot magenta-red (0xff0066, hue
-            // ~345°) — distinct from the string red 0xff2828 at hue ~0°. Note rendering
-            // swaps its outline.material between mWhiteOutline / per-string
-            // mHitBright[s] / mMissOutline based on recent notedetect events.
-            mMissOutline = new T.MeshLambertMaterial({ color: 0xff0066, emissive: 0xff0066, emissiveIntensity: 1.2, transparent: true, opacity: 1.0, depthWrite: false });
-            // Transparent placeholder for front (+Z, group 4) and back (-Z, group 5)
-            // of the lateral face-fill material array. Also the default material for
-            // the pNoteEdge pool: pool consumers reassign .material before render, so
-            // the placeholder is never displayed — using an explicitly-invisible
-            // material makes that intent obvious.
-            // BoxGeometry group order: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z(front), 5=-Z(back)
-            mEdgeTransparent = new T.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
-            // mMissEdgeArrays: use mMissOutline (same Lambert+emissive material as the gem
-            // border) so the lateral face fill matches the outline colour exactly.
-            mMissEdgeArrays = [mMissOutline, mMissOutline, mMissOutline, mMissOutline, mEdgeTransparent, mEdgeTransparent];
-
-            // Hit: fixed neon spring-green on every string — 0x22ff88 is cyan-shifted
-            // enough to be readable even on the green string (0x30d040). The outline
-            // + lateral faces flash green regardless of which string was hit.
-            mHitBright = activePalette.map(() => new T.MeshLambertMaterial({
-                color: 0x22ff88, emissive: 0x22ff88, emissiveIntensity: 4.0 * glowMul,
-                transparent: true, opacity: 1.0, depthWrite: false,
-            }));
-            mHitBrightArrays = mHitBright.map(m => [m, m, m, m, mEdgeTransparent, mEdgeTransparent]);
-
-            // Rim flash: string-coloured, wire-fashion intensity. Colour and
-            // emissive both take the palette colour so the rim reads as the
-            // string lighting up, not as a white wash over it.
-            mRimFlash = activePalette.map((c) => new T.MeshLambertMaterial({
-                color: c, emissive: c, emissiveIntensity: 1,
-                transparent: true, opacity: 1.0, depthWrite: false,
-            }));
-            // Readability (#2 / charrette): the note gems + their outlines punch THROUGH
-            // the distance fog so upcoming notes stay legible as they render in at the
-            // horizon. The board, lane, sustains and background scenery keep their
-            // atmospheric fog — only the note-defining materials are exempted, so the
-            // highway still reads as deep while the notes never dissolve into the haze.
-            [mWhiteOutline, mMissOutline].forEach(m => { if (m) m.fog = false; });
-            [mStr, mGlow, mStrHitOutline, mHitBright, mRimFlash].forEach(arr => arr && arr.forEach(m => { if (m) m.fog = false; }));
-            // Outline materials render at a lower renderOrder than the body.
-            // The body is rendered on top with opacity:1 on hit/miss, which
-            // fully covers the outline center — only the fringe that extends
-            // past the body edges (0.2*K on each side) is visible.
-            mSusOutline     = new T.MeshLambertMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.3, transparent: true, opacity: 0.75, depthWrite: false });
-            mHitSusOutline  = new T.MeshLambertMaterial({ color: 0x22ff88, emissive: 0x22ff88, emissiveIntensity: 0.8, transparent: true, opacity: 0.45, depthWrite: false });
-            mBeatM = new T.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.25 });
-            mBeatQ = new T.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.07 });
-
-            // ── Board ghost: filled rim (ExtrudeGeometry w/ hole) in string colour ──
-            // Matches outline 1.1× vs core 1.0× like drawNote; centre stays empty.
-            // 3 slots per string (up to 3 simultaneous ghost previews, chart-
-            // format style): slot 0 is the "next on string" / chord / arp ghost
-            // (unchanged selection logic), slots 1/2 are independent
-            // "upcoming" lead-note previews. All slots share one geometry —
-            // it's identical (NW/NH/ND-based) regardless of string or slot,
-            // so one ExtrudeGeometry serves all nStr*3 meshes.
-            const _ghostFrameGeo = mkGhostFrameGeometry();
-            projMeshArr = activePalette.map((_, s) => [0, 1, 2].map(() => {
-                const mat = new T.MeshStandardMaterial({
-                    color: activePalette[s],
-                    emissive: activePalette[s],
-                    emissiveIntensity: 0.002,
-                    transparent: true,
-                    opacity: 0.65,
-                    roughness: 1,
-                    depthWrite: false,
-                    depthTest: false,
-                });
-                const m = new T.Mesh(_ghostFrameGeo, mat);
-                m.visible = false;
-                // Board projection ghost frame. depthTest:false above, so
-                // renderOrder alone decides stacking — keep it above the
-                // sus trails (12/13) but below note gems (20/21) so it
-                // stays visible on the fretboard without covering notes.
-                m.renderOrder = 14;
-                noteG.add(m);
-                return m;
-            }));
-
-            // ── Pools ──────────────────────────────────────────────────────
-            pNote = pool(noteG, () => new T.Mesh(gNote, mStr[0]));
-            // Pool default is the always-invisible mEdgeTransparent — every
-            // consumer reassigns .material before render (to a verdict edge
-            // material array), so the placeholder is never displayed.
-            pNoteEdge = pool(noteG, () => new T.Mesh(gNote, mEdgeTransparent));
-            pAccentHalo = pool(noteG, () => new T.Mesh(gNote, mAccentHaloFar[0]));
-            pSus = pool(noteG, () => new T.Mesh(gSus, mSus[0]));
-            pSusOutline = pool(noteG, () => new T.Mesh(gSus, mSusOutline));
-            const mkSlideRibbonGeo = () => {
-                const nVert = 4 * (SLIDE_RIBBON_SAMPLES + 1);
-                const g = new T.BufferGeometry();
-                g.setAttribute('position', new T.Float32BufferAttribute(new Float32Array(nVert * 3), 3));
-                // SLIDE_RIBBON_INDICES_ARR is the plain-Array form (see module-init
-                // comment) shared across pool meshes; setIndex() rewraps it into a
-                // fresh Uint16BufferAttribute per geometry, so the share is safe.
-                g.setIndex(SLIDE_RIBBON_INDICES_ARR);
-                // Static cross-section normals: each ring is an axis-aligned quad,
-                // so vertex normals point radially in the XY plane regardless of
-                // the slide's Z-direction curvature. Pre-fill once and skip the
-                // per-frame computeVertexNormals() pass that previously ran on
-                // every sustained-slide update (Copilot perf finding on PR #215).
-                const SQRT_HALF = Math.SQRT1_2;
-                const normals = new Float32Array(nVert * 3);
-                for (let k = 0; k <= SLIDE_RIBBON_SAMPLES; k++) {
-                    const o = k * 12;
-                    // v0 (-X,-Y), v1 (+X,-Y), v2 (+X,+Y), v3 (-X,+Y)
-                    normals[o]     = -SQRT_HALF; normals[o + 1]  = -SQRT_HALF; normals[o + 2]  = 0;
-                    normals[o + 3] =  SQRT_HALF; normals[o + 4]  = -SQRT_HALF; normals[o + 5]  = 0;
-                    normals[o + 6] =  SQRT_HALF; normals[o + 7]  =  SQRT_HALF; normals[o + 8]  = 0;
-                    normals[o + 9] = -SQRT_HALF; normals[o + 10] =  SQRT_HALF; normals[o + 11] = 0;
-                }
-                g.setAttribute('normal', new T.Float32BufferAttribute(normals, 3));
-                return g;
-            };
-            // Ribbon meshes mutate vertex positions every frame in
-            // slideRibbonUpdatePositions but the mesh itself stays at (0,0,0)
-            // and the geometry's bounding sphere is never recomputed. With
-            // frustum culling on, Three.js tests the (0,0,0)-centred bounds
-            // and culls the ribbon as soon as the camera pans away from world
-            // origin, so slides flicker in/out. Disable culling on these
-            // meshes — the ribbon footprint is small and they're already
-            // gated by t0/t1 reachability before render.
-            pSusRibbon = pool(noteG, () => {
-                const m = new T.Mesh(mkSlideRibbonGeo(), mSus[0]);
-                m.frustumCulled = false;
-                return m;
-            });
-            pSusRibbonOl = pool(noteG, () => {
-                const m = new T.Mesh(mkSlideRibbonGeo(), mSusOutline);
-                m.frustumCulled = false;
-                m.renderOrder = -3;
-                return m;
-            });
-            // One shared material per technique-mesh type. The pool factory
-            // hands out fresh meshes that all reference the same material,
-            // so a dense HO/PO passage doesn't churn N MeshLambertMaterial
-            // allocations and N GPU material switches.
-            // Transparent + no depth write/test so the tap chevron draws in
-            // the transparent pass where drawNote assigns renderOrder 1000.
-            mTapChevron = new T.MeshLambertMaterial({
-                color: 0xd4d4d4,
-                emissive: 0xd4d4d4,
-                emissiveIntensity: 0.9,
-                transparent: true,
-                opacity: 0.85,
-                side: T.DoubleSide, forceSinglePass: true,
-                depthWrite: false,
-                depthTest: false,
-            });
-            pTapChevron = pool(noteG, () => new T.Mesh(gTapChevron, mTapChevron));
-            pLbl  = pool(lblG,  () => new T.Sprite(txtMat('0', '#fff', false, 'technique')));
-            pBeat = pool(beatG, () => new T.Line(gBeat, mBeatQ));
-            pSec  = pool(lblG,  () => new T.Sprite(txtMat('', '#0dd', true, 'section')));
-
-            // Chord sustain length indicator — thin horizontal plane rails.
-            // Unit plane (1×1 in XZ) laid flat; scaled to (railWidth, 1, railLen).
-            // A horizontal plane seen from the camera looking down-forward is
-            // face-on and has real apparent thickness — unlike T.Line (always 1px).
-            // depthTest:false so they never occlude gems; renderOrder 11 places
-            // them above lane dividers (2) and chord fill (10), at the same level
-            // as chord frame edges (11), and BELOW sustain trails (12/13), note
-            // gems (dynamic ≥50), and arp brackets (18). The bloom halo (10) sits
-            // behind the core rail (11). Keeping susrail behind note sus trails
-            // prevents the rail border from covering individual note tails
-            // (sustain/vibrato/tremolo/bend). (Was 14/16 which rendered on top of
-            // 12/13 sus trails, causing the outer border to overlap tails.)
-            gSusRail = new T.PlaneGeometry(1, 1);
-            gSusRail.rotateX(-Math.PI / 2); // lay flat in XZ plane
-            mSusRailBase = new T.MeshBasicMaterial({
-                color: CHORD_BOX_TEAL_HEX,
-                transparent: true, opacity: 0.85,
-                depthTest: false, depthWrite: false,
-                fog: false, side: T.DoubleSide, forceSinglePass: true,
-            });
-            pSusRail = pool(noteG, () => {
-                const m = new T.Mesh(gSusRail, mSusRailBase.clone());
-                m.renderOrder = 5; // below strings (7) so strings render on top
-                return m;
-            });
-
-            // Bloom glow for chord sustain rails — wider plane with a gaussian
-            // falloff texture (bright centre → transparent edges in X direction)
-            // and additive blending, so it brightens whatever is behind it.
-            // renderOrder 4 places it behind the core rail (5).
-            _bloomGaussTex = _makeGaussTex(T);
-            gSusRailBloom = new T.PlaneGeometry(1, 1);
-            gSusRailBloom.rotateX(-Math.PI / 2);
-            mSusRailBloomBase = new T.MeshBasicMaterial({
-                color: CHORD_BOX_TEAL_HEX,
-                map: _bloomGaussTex,
-                transparent: true, opacity: 0.55,
-                blending: T.AdditiveBlending,
-                depthTest: false, depthWrite: false,
-                fog: false, side: T.DoubleSide, forceSinglePass: true,
-            });
-            pSusRailBloom = pool(noteG, () => {
-                const m = new T.Mesh(gSusRailBloom, mSusRailBloomBase.clone());
-                m.renderOrder = 4; // below strings (7) so strings render on top
-                return m;
-            });
-
-            // Rotatable plane pool for technique markers (pm, mt, hm, hp, H/P, bend).
-            // Unlike T.Sprite, a PlaneGeometry mesh accepts rotation.z = approachRot
-            // so markers stay coplanar with the gem as it tilts from vertical to flat.
-            gTechPlane = new T.PlaneGeometry(1, 1);
-            pTechPlane = pool(noteG, () => {
-                const m = new T.Mesh(gTechPlane, new T.MeshBasicMaterial({
-                    transparent: true, depthTest: false, depthWrite: false, side: T.DoubleSide, forceSinglePass: true,
-                }));
-                m.renderOrder = 1000;
-                return m;
-            });
-
-            // ── InstancedMesh temporaries ──────────────────────────────────────
-            _imM4    = new T.Matrix4();
-            _imPos   = new T.Vector3();
-            _imSca   = new T.Vector3();
-            _imQ     = new T.Quaternion();
-            _imAZ    = new T.Vector3(0, 0, 1);
-            _imColor = new T.Color();
-
-            // ── Shared ShaderMaterial templates ───────────────────────────────
-            // Vertex shader used by PM-X and FH-X on individual note gems.
-            // Three.js injects `USE_INSTANCING` + `instanceMatrix` attribute
-            // into the prefix when an InstancedMesh uses a ShaderMaterial.
-            const _imTechVert = [
-                'attribute float instanceAlpha;',
-                'varying float vAlpha;',
-                'varying vec2 vUv;',
-                'void main() {',
-                '    vUv = uv;',
-                '    vAlpha = instanceAlpha;',
-                '    vec4 pos = vec4(position, 1.0);',
-                '    #ifdef USE_INSTANCING',
-                '    pos = instanceMatrix * pos;',
-                '    #endif',
-                '    gl_Position = projectionMatrix * modelViewMatrix * pos;',
-                '}',
-            ].join('\n');
-            const _imTechFrag = [
-                'uniform sampler2D map;',
-                'varying float vAlpha;',
-                'varying vec2 vUv;',
-                'void main() {',
-                '    vec4 t = texture2D(map, vUv);',
-                '    if (t.a * vAlpha < 0.01) discard;',
-                '    gl_FragColor = vec4(t.rgb, t.a * vAlpha);',
-                '}',
-            ].join('\n');
-
-            // ── PM / FH tech marker InstancedMeshes ───────────────────────────
-            // Each IM gets a geometry clone so instanceAlpha is a separate buffer.
-            const _mkTechIM = (spriteMat, alphaArr) => {
-                const geo = gTechPlane.clone();
-                const alphaAttr = new T.InstancedBufferAttribute(alphaArr, 1);
-                alphaAttr.setUsage(T.DynamicDrawUsage);
-                geo.setAttribute('instanceAlpha', alphaAttr);
-                const mat = new T.ShaderMaterial({
-                    uniforms: { map: { value: spriteMat.map } },
-                    vertexShader: _imTechVert,
-                    fragmentShader: _imTechFrag,
-                    transparent: true, depthTest: false, depthWrite: false, side: T.DoubleSide, forceSinglePass: true,
-                });
-                const im = new T.InstancedMesh(geo, mat, IM_TECH_CAP);
-                im.instanceMatrix.setUsage(T.DynamicDrawUsage);
-                im.frustumCulled = false;
-                im.count = 0;
-                noteG.add(im);
-                return { im, geo, mat };
-            };
-            { const r = _mkTechIM(palmMuteXSpriteMat(),    _imPMTechAlphaArr);
-              imPMTech = r.im; _imGPMTech = r.geo; _imPMTechMat = r.mat; imPMTech.renderOrder = 702; }
-            { const r = _mkTechIM(fretHandMuteXSpriteMat(), _imFHTechAlphaArr);
-              imFHTech = r.im; _imGFHTech = r.geo; _imFHTechMat = r.mat; imFHTech.renderOrder = 700; }
-
-            // Dynamic fret number labels (heat-coloured, updated each frame)
-            pFretLbl = pool(lblG, () => new T.Sprite(txtMat('0', '#888', false, 'fretRow')));
-
-            // Highlight lane plane over active fret range. With the anchor-driven
-            // segmented lanes we render up to fret-count × HWY_LANE_TIME_SLICES (96)
-            // pLane meshes per frame, so:
-            //   - geometry is a shared PlaneGeometry(1,1) (was per-mesh, never differed)
-            //   - 2 shared MeshBasicMaterials (odd / even stripe colour) replace the
-            //     per-mesh material clones; the per-frame opacity still travels via
-            //     the materials but is set once outside the inner loop, not per-mesh.
-            gLanePlane = new T.PlaneGeometry(1, 1);
-            mLaneOdd = new T.MeshBasicMaterial({
-                color: HWY_LANE_STRIPE_ODD_HEX, transparent: true, opacity: 0, depthWrite: false,
-            });
-            mLaneEven = new T.MeshBasicMaterial({
-                color: HWY_LANE_STRIPE_EVEN_HEX, transparent: true, opacity: 0, depthWrite: false,
-            });
-            // Tracked for explicit disposal in teardown — these materials may
-            // not be reachable via scene.traverse() if no lane was ever rendered.
-            _ownedSharedMats.push(mLaneOdd, mLaneEven);
-            _ownedSharedGeos.push(gLanePlane);
-            pLane = pool(noteG, () => new T.Mesh(gLanePlane, mLaneOdd));
-
-            gGhostFretPlane = new T.PlaneGeometry(1, 1);
-            _ownedSharedGeos.push(gGhostFretPlane);
-            const mGhostFretLblPh = new T.MeshBasicMaterial({
-                color: 0xffffff, transparent: true, depthTest: false, depthWrite: false,
-            });
-            _ownedSharedMats.push(mGhostFretLblPh);
-            pGhostFretLbl = pool(noteG, () => {
-                const m = new T.Mesh(gGhostFretPlane, mGhostFretLblPh);
-                // Must be above the proj frame (renderOrder=14) and opaque
-                // geometry — same contract as technique labels (renderOrder=1000):
-                // depthTest:false alone is insufficient, renderOrder=1000 needed.
-                m.renderOrder = 1000;
-                m.frustumCulled = false;
-                return m;
-            });
-
-            // Vertical fret dividers within active lane
-            const gLaneDivider = new T.BoxGeometry(0.15 * K, 0.15 * K, 1);
-            mLaneDivider = new T.MeshBasicMaterial({
-                color: 0x46DDE6, transparent: true, opacity: 1.00, fog: false, depthWrite: false,
-            });
-            mLaneDividerArp = new T.MeshBasicMaterial({
-                color: ARPEGGIO_RIM_BLUE_HEX,
-                transparent: true, opacity: 0.08, fog: false, depthWrite: false,
-            });
-            mLaneDividerExt = new T.MeshBasicMaterial({
-                color: 0x364D5F, transparent: true, opacity: 0.4, fog: false, depthWrite: false,
-            });
-            _ownedSharedMats.push(mLaneDivider, mLaneDividerArp, mLaneDividerExt);
-            pLaneDivider = pool(noteG, () => new T.Mesh(gLaneDivider, mLaneDivider));
-
-            // Chord frame palette (frame alpha 128, fill gradient alpha 32; MeshBasic).
-            const chR = CHORD_BOX_TEAL_HEX >> 16 & 255;
-            const chG = CHORD_BOX_TEAL_HEX >> 8 & 255;
-            const chB = CHORD_BOX_TEAL_HEX & 255;
-            const dkR = CHORD_BOX_TEAL_DARK_HEX >> 16 & 255;
-            const dkG = CHORD_BOX_TEAL_DARK_HEX >> 8 & 255;
-            const dkB = CHORD_BOX_TEAL_DARK_HEX & 255;
-            const aFill = Math.round(CHORD_BOX_FILL_GRAD_ALPHA * 255);
-            chordFrameGradTex = new T.DataTexture(
-                new Uint8Array([ chR, chG, chB, aFill, dkR, dkG, dkB, aFill, chR, chG, chB, aFill ]),
-                3, 1, T.RGBAFormat);
-            chordFrameGradTex.magFilter = T.LinearFilter;
-            chordFrameGradTex.minFilter = T.LinearFilter;
-            chordFrameGradTex.wrapS = T.ClampToEdgeWrapping;
-            chordFrameGradTex.wrapT = T.ClampToEdgeWrapping;
-            // DataTexture defaults to linear color space; flag this gradient
-            // as sRGB so the chord-box hex values match other sRGB color textures.
-            chordFrameGradTex.colorSpace = T.SRGBColorSpace;
-            chordFrameGradTex.needsUpdate = true;
-
-            const arR = ARPEGGIO_BOX_BLUE_HEX >> 16 & 255;
-            const arG = ARPEGGIO_BOX_BLUE_HEX >> 8 & 255;
-            const arB = ARPEGGIO_BOX_BLUE_HEX & 255;
-            const arDR = ARPEGGIO_BOX_BLUE_DARK_HEX >> 16 & 255;
-            const arDG = ARPEGGIO_BOX_BLUE_DARK_HEX >> 8 & 255;
-            const arDB = ARPEGGIO_BOX_BLUE_DARK_HEX & 255;
-            chordFrameGradTexArp = new T.DataTexture(
-                new Uint8Array([ arR, arG, arB, aFill, arDR, arDG, arDB, aFill, arR, arG, arB, aFill ]),
-                3, 1, T.RGBAFormat);
-            chordFrameGradTexArp.magFilter = T.LinearFilter;
-            chordFrameGradTexArp.minFilter = T.LinearFilter;
-            chordFrameGradTexArp.wrapS = T.ClampToEdgeWrapping;
-            chordFrameGradTexArp.wrapT = T.ClampToEdgeWrapping;
-            chordFrameGradTexArp.colorSpace = T.SRGBColorSpace;
-            chordFrameGradTexArp.needsUpdate = true;
-
-            pChordFrameFill = pool(noteG, () => new T.Mesh(
-                new T.PlaneGeometry(1, 1),
-                new T.MeshBasicMaterial({
-                    map: chordFrameGradTex,
-                    transparent: true,
-                    opacity: 1,
-                    depthWrite: false,
-                    depthTest: false,
-                    fog: false,
-                    side: T.DoubleSide, forceSinglePass: true,
-                }),
-            ));
-            pChordBox = pool(noteG, () => new T.Mesh(
-                new T.BoxGeometry(1, 1, 1),
-                new T.MeshBasicMaterial({
-                    color: CHORD_BOX_TEAL_HEX,
-                    transparent: true,
-                    opacity: CHORD_BOX_EDGE_ALPHA,
-                    depthWrite: false,
-                    depthTest: false,
-                    fog: false,
-                    side: T.DoubleSide, forceSinglePass: true,
-                }),
-            ));
-
-            // PM strum X fill — 4 corner regions + centre; the 4 arms (L,R,T,B) are left empty.
-            // 16 vertices, 14 triangles.
-            //  0=A(-1,1)  1=TLC(-0.48,1)  2=T(-0.012,0.257)  3=TRC(0.5,1)
-            //  4=BR(1,1)  5=REB(1,0.5)   6=R(0.476,-0.011)  7=RET(1,-0.5)
-            //  8=C(1,-1)  9=BRC(0.48,-1) 10=B(-0.003,-0.276) 11=BLC(-0.48,-1)
-            // 12=D(-1,-1) 13=LET(-1,-0.5) 14=L(-0.494,-0.011) 15=LEB(-1,0.5)
-            {
-                // prettier-ignore
-                const pos = new Float32Array([
-                    -1,      1,      0,  //  0  A
-                    -0.480,  1,      0,  //  1  TLC
-                    -0.012,  0.257,  0,  //  2  T
-                     0.500,  1,      0,  //  3  TRC
-                     1,      1,      0,  //  4  BR
-                     1,      0.5,    0,  //  5  REB
-                     0.476, -0.011,  0,  //  6  R
-                     1,     -0.5,    0,  //  7  RET
-                     1,     -1,      0,  //  8  C
-                     0.480, -1,      0,  //  9  BRC
-                    -0.003, -0.276,  0,  // 10  B
-                    -0.480, -1,      0,  // 11  BLC
-                    -1,     -1,      0,  // 12  D
-                    -1,     -0.5,    0,  // 13  LET
-                    -0.494, -0.011,  0,  // 14  L
-                    -1,      0.5,    0,  // 15  LEB
-                ]);
-                // prettier-ignore
-                const idx = new Uint16Array([
-                    // top-left corner: A,TLC,T,L,LEB
-                     0,  1,  2,
-                     0,  2, 14,
-                     0, 14, 15,
-                    // top-right corner: TRC,BR,REB,R,T
-                     3,  4,  5,
-                     3,  5,  6,
-                     3,  6,  2,
-                    // centre: T,R,B,L
-                     2,  6, 10,
-                     2, 10, 14,
-                    // bottom-right corner: RET,C,BRC,B,R
-                     7,  8,  9,
-                     7,  9, 10,
-                     7, 10,  6,
-                    // bottom-left corner: LET,L,B,BLC,D
-                    13, 14, 10,
-                    13, 10, 11,
-                    13, 11, 12,
-                ]);
-                gPMXFill = new T.BufferGeometry();
-                gPMXFill.setAttribute('position', new T.BufferAttribute(pos, 3));
-                gPMXFill.setIndex(new T.BufferAttribute(idx, 1));
-            }
-            // PM fill — InstancedMesh (black, varying alpha per chord).
-            {
-                const _imFillVert = [
-                    'attribute float instanceAlpha;',
-                    'varying float vAlpha;',
-                    'void main() {',
-                    '    vAlpha = instanceAlpha;',
-                    '    vec4 pos = vec4(position, 1.0);',
-                    '    #ifdef USE_INSTANCING',
-                    '    pos = instanceMatrix * pos;',
-                    '    #endif',
-                    '    gl_Position = projectionMatrix * modelViewMatrix * pos;',
-                    '}',
-                ].join('\n');
-                const _imFillFrag = [
-                    'varying float vAlpha;',
-                    'void main() {',
-                    '    if (vAlpha <= 0.0) discard;',
-                    '    gl_FragColor = vec4(0.0, 0.0, 0.0, vAlpha);',
-                    '}',
-                ].join('\n');
-                const alphaAttr = new T.InstancedBufferAttribute(_imPMXFillAlphaArr, 1);
-                alphaAttr.setUsage(T.DynamicDrawUsage);
-                gPMXFill.setAttribute('instanceAlpha', alphaAttr);
-                _imPMXFillMat = new T.ShaderMaterial({
-                    vertexShader: _imFillVert, fragmentShader: _imFillFrag,
-                    transparent: true, depthTest: false, depthWrite: false,
-                    fog: false, side: T.DoubleSide, forceSinglePass: true,
-                });
-                imPMXFill = new T.InstancedMesh(gPMXFill, _imPMXFillMat, IM_STRUM_CAP);
-                imPMXFill.instanceMatrix.setUsage(T.DynamicDrawUsage);
-                imPMXFill.frustumCulled = false;
-                imPMXFill.renderOrder = 10.5;
-                imPMXFill.count = 0;
-                noteG.add(imPMXFill);
-            }
-
-            // FH (frethand mute) strum X fill — 5 regions: 4 corner quadrants + centre diamond.
-            // 12 vertices, 10 triangles. L/R wings stop at fx=±0.50 (no solid lateral blocks).
-            //  0=LET(-0.50,+1)  1=TLC(-0.15,+1)  2=T(0,+0.42)   3=TRC(+0.15,+1)
-            //  4=RET(+0.50,+1)  5=REB(+0.50,-1)  6=R(+0.28,0)   7=B(0,-0.42)
-            //  8=BRC(+0.15,-1)  9=BLC(-0.15,-1) 10=LEB(-0.50,-1) 11=L(-0.28,0)
-            {
-                // prettier-ignore
-                const pos = new Float32Array([
-                    -0.50,  1,      0,  //  0  LET
-                    -0.15,  1,      0,  //  1  TLC
-                     0,     0.42,   0,  //  2  T
-                     0.15,  1,      0,  //  3  TRC
-                     0.50,  1,      0,  //  4  RET
-                     0.50, -1,      0,  //  5  REB
-                     0.28,  0,      0,  //  6  R
-                     0,    -0.42,   0,  //  7  B
-                     0.15, -1,      0,  //  8  BRC
-                    -0.15, -1,      0,  //  9  BLC
-                    -0.50, -1,      0,  // 10  LEB
-                    -0.28,  0,      0,  // 11  L
-                ]);
-                // prettier-ignore
-                const idx = new Uint16Array([
-                    // top-left corner: LET,TLC,T,L
-                     0,  1,  2,
-                     0,  2, 11,
-                    // top-right corner: TRC,RET,R,T
-                     3,  4,  6,
-                     3,  6,  2,
-                    // bottom-right corner: REB,R,B,BRC
-                     5,  6,  7,
-                     5,  7,  8,
-                    // bottom-left corner: LEB,L,B,BLC
-                    10, 11,  7,
-                    10,  7,  9,
-                    // centre diamond: L,T,R,B
-                    11,  2,  6,
-                    11,  6,  7,
-                ]);
-                gFHXFill = new T.BufferGeometry();
-                gFHXFill.setAttribute('position', new T.BufferAttribute(pos, 3));
-                gFHXFill.setIndex(new T.BufferAttribute(idx, 1));
-            }
-            // FH fill — InstancedMesh (black, varying alpha per chord).
-            {
-                const _imFillVert = [
-                    'attribute float instanceAlpha;',
-                    'varying float vAlpha;',
-                    'void main() {',
-                    '    vAlpha = instanceAlpha;',
-                    '    vec4 pos = vec4(position, 1.0);',
-                    '    #ifdef USE_INSTANCING',
-                    '    pos = instanceMatrix * pos;',
-                    '    #endif',
-                    '    gl_Position = projectionMatrix * modelViewMatrix * pos;',
-                    '}',
-                ].join('\n');
-                const _imFillFrag = [
-                    'varying float vAlpha;',
-                    'void main() {',
-                    '    if (vAlpha <= 0.0) discard;',
-                    '    gl_FragColor = vec4(0.0, 0.0, 0.0, vAlpha);',
-                    '}',
-                ].join('\n');
-                const alphaAttr = new T.InstancedBufferAttribute(_imFHXFillAlphaArr, 1);
-                alphaAttr.setUsage(T.DynamicDrawUsage);
-                gFHXFill.setAttribute('instanceAlpha', alphaAttr);
-                _imFHXFillMat = new T.ShaderMaterial({
-                    vertexShader: _imFillVert, fragmentShader: _imFillFrag,
-                    transparent: true, depthTest: false, depthWrite: false,
-                    fog: false, side: T.DoubleSide, forceSinglePass: true,
-                });
-                imFHXFill = new T.InstancedMesh(gFHXFill, _imFHXFillMat, IM_STRUM_CAP);
-                imFHXFill.instanceMatrix.setUsage(T.DynamicDrawUsage);
-                imFHXFill.frustumCulled = false;
-                imFHXFill.renderOrder = 10.5;
-                imFHXFill.count = 0;
-                noteG.add(imFHXFill);
-            }
-
-            // PM X lines — 8 segments baked as thin quads in ±1 normalised space.
-            // Scale the pool mesh by (innerW*0.5, -innerH*0.5, ...) per chord;
-            // the Y-negated scale matches the XLINES convention (fya>0 = below centre).
-            if (!gPMXLines) {
-                const HT = 0.016; // normalised half-thickness ≈ lw/hH for a typical chord
-                // prettier-ignore
-                const XLINES = [
-                    [-1.000, -0.500, -0.494, -0.011],
-                    [-1.000,  0.500, -0.494, -0.011],
-                    [ 1.000, -0.500,  0.476, -0.011],
-                    [ 1.000,  0.500,  0.476, -0.011],
-                    [-0.480,  1.000, -0.012,  0.257],
-                    [ 0.500,  1.000, -0.012,  0.257],
-                    [ 0.480, -1.000,  0.000, -0.276],
-                    [-0.480, -1.000, -0.006, -0.276],
-                ];
-                const pos = new Float32Array(XLINES.length * 4 * 3);
-                const idx = new Uint16Array(XLINES.length * 6);
-                for (let i = 0; i < XLINES.length; i++) {
-                    const [xa, ya, xb, yb] = XLINES[i];
-                    const dx = xb - xa, dy = yb - ya;
-                    const il = 1 / Math.sqrt(dx * dx + dy * dy);
-                    const nx = -dy * il, ny = dx * il;
-                    const vi = i * 12, ii = i * 6, vb = i * 4;
-                    pos[vi+0]=xa+nx*HT; pos[vi+1]=ya+ny*HT; pos[vi+2]=0;
-                    pos[vi+3]=xb+nx*HT; pos[vi+4]=yb+ny*HT; pos[vi+5]=0;
-                    pos[vi+6]=xb-nx*HT; pos[vi+7]=yb-ny*HT; pos[vi+8]=0;
-                    pos[vi+9]=xa-nx*HT; pos[vi+10]=ya-ny*HT; pos[vi+11]=0;
-                    idx[ii+0]=vb;   idx[ii+1]=vb+1; idx[ii+2]=vb+2;
-                    idx[ii+3]=vb;   idx[ii+4]=vb+2; idx[ii+5]=vb+3;
-                }
-                gPMXLines = new T.BufferGeometry();
-                gPMXLines.setAttribute('position', new T.BufferAttribute(pos, 3));
-                gPMXLines.setIndex(new T.BufferAttribute(idx, 1));
-            }
-            // PM lines — InstancedMesh (varying color + alpha per chord).
-            // instanceColor (THREE built-in) carries baseRimHex per instance;
-            // instanceAlpha carries the per-chord opacity.
-            {
-                const _imLinesVert = [
-                    'attribute float instanceAlpha;',
-                    'varying float vAlpha;',
-                    'varying vec3 vColor;',
-                    'void main() {',
-                    '    vAlpha = instanceAlpha;',
-                    '    #ifdef USE_INSTANCING_COLOR',
-                    '    vColor = instanceColor;',
-                    '    #else',
-                    '    vColor = vec3(1.0);',
-                    '    #endif',
-                    '    vec4 pos = vec4(position, 1.0);',
-                    '    #ifdef USE_INSTANCING',
-                    '    pos = instanceMatrix * pos;',
-                    '    #endif',
-                    '    gl_Position = projectionMatrix * modelViewMatrix * pos;',
-                    '}',
-                ].join('\n');
-                const _imLinesFrag = [
-                    'varying float vAlpha;',
-                    'varying vec3 vColor;',
-                    'void main() {',
-                    '    if (vAlpha <= 0.0) discard;',
-                    '    gl_FragColor = vec4(vColor, vAlpha);',
-                    '}',
-                ].join('\n');
-                const alphaAttr = new T.InstancedBufferAttribute(_imPMXLinesAlphaArr, 1);
-                alphaAttr.setUsage(T.DynamicDrawUsage);
-                gPMXLines.setAttribute('instanceAlpha', alphaAttr);
-                _imPMXLinesMat = new T.ShaderMaterial({
-                    vertexShader: _imLinesVert, fragmentShader: _imLinesFrag,
-                    transparent: true, depthTest: false, depthWrite: false,
-                    fog: false, side: T.DoubleSide, forceSinglePass: true,
-                });
-                imPMXLines = new T.InstancedMesh(gPMXLines, _imPMXLinesMat, IM_STRUM_CAP);
-                imPMXLines.instanceMatrix.setUsage(T.DynamicDrawUsage);
-                imPMXLines.frustumCulled = false;
-                imPMXLines.renderOrder = 11;
-                // Eagerly initialise instanceColor so USE_INSTANCING_COLOR is
-                // defined when the shader is compiled on the first draw.
-                _imColor.set(1, 1, 1);
-                imPMXLines.setColorAt(0, _imColor);
-                imPMXLines.instanceColor.setUsage(T.DynamicDrawUsage);
-                imPMXLines.count = 0;
-                noteG.add(imPMXLines);
-            }
-
-            // FH X lines — same scheme, 8 segments from the FH_XLINES pattern
-            if (!gFHXLines) {
-                const HT = 0.022; // slightly wider — FH wings are shorter, need more visual weight
-                // prettier-ignore
-                const FH_XLINES = [
-                    [-0.50,  1.00, -0.28,  0.00],
-                    [-0.50, -1.00, -0.28,  0.00],
-                    [ 0.50,  1.00,  0.28,  0.00],
-                    [ 0.50, -1.00,  0.28,  0.00],
-                    [-0.15, -1.00,  0.00, -0.42],
-                    [ 0.15, -1.00,  0.00, -0.42],
-                    [ 0.15,  1.00,  0.00,  0.42],
-                    [-0.15,  1.00,  0.00,  0.42],
-                ];
-                const pos = new Float32Array(FH_XLINES.length * 4 * 3);
-                const idx = new Uint16Array(FH_XLINES.length * 6);
-                for (let i = 0; i < FH_XLINES.length; i++) {
-                    const [xa, ya, xb, yb] = FH_XLINES[i];
-                    const dx = xb - xa, dy = yb - ya;
-                    const il = 1 / Math.sqrt(dx * dx + dy * dy);
-                    const nx = -dy * il, ny = dx * il;
-                    const vi = i * 12, ii = i * 6, vb = i * 4;
-                    pos[vi+0]=xa+nx*HT; pos[vi+1]=ya+ny*HT; pos[vi+2]=0;
-                    pos[vi+3]=xb+nx*HT; pos[vi+4]=yb+ny*HT; pos[vi+5]=0;
-                    pos[vi+6]=xb-nx*HT; pos[vi+7]=yb-ny*HT; pos[vi+8]=0;
-                    pos[vi+9]=xa-nx*HT; pos[vi+10]=ya-ny*HT; pos[vi+11]=0;
-                    idx[ii+0]=vb;   idx[ii+1]=vb+1; idx[ii+2]=vb+2;
-                    idx[ii+3]=vb;   idx[ii+4]=vb+2; idx[ii+5]=vb+3;
-                }
-                gFHXLines = new T.BufferGeometry();
-                gFHXLines.setAttribute('position', new T.BufferAttribute(pos, 3));
-                gFHXLines.setIndex(new T.BufferAttribute(idx, 1));
-            }
-            // FH lines — InstancedMesh (varying color + alpha per chord).
-            {
-                const _imLinesVert = [
-                    'attribute float instanceAlpha;',
-                    'varying float vAlpha;',
-                    'varying vec3 vColor;',
-                    'void main() {',
-                    '    vAlpha = instanceAlpha;',
-                    '    #ifdef USE_INSTANCING_COLOR',
-                    '    vColor = instanceColor;',
-                    '    #else',
-                    '    vColor = vec3(1.0);',
-                    '    #endif',
-                    '    vec4 pos = vec4(position, 1.0);',
-                    '    #ifdef USE_INSTANCING',
-                    '    pos = instanceMatrix * pos;',
-                    '    #endif',
-                    '    gl_Position = projectionMatrix * modelViewMatrix * pos;',
-                    '}',
-                ].join('\n');
-                const _imLinesFrag = [
-                    'varying float vAlpha;',
-                    'varying vec3 vColor;',
-                    'void main() {',
-                    '    if (vAlpha <= 0.0) discard;',
-                    '    gl_FragColor = vec4(vColor, vAlpha);',
-                    '}',
-                ].join('\n');
-                const alphaAttr = new T.InstancedBufferAttribute(_imFHXLinesAlphaArr, 1);
-                alphaAttr.setUsage(T.DynamicDrawUsage);
-                gFHXLines.setAttribute('instanceAlpha', alphaAttr);
-                _imFHXLinesMat = new T.ShaderMaterial({
-                    vertexShader: _imLinesVert, fragmentShader: _imLinesFrag,
-                    transparent: true, depthTest: false, depthWrite: false,
-                    fog: false, side: T.DoubleSide, forceSinglePass: true,
-                });
-                imFHXLines = new T.InstancedMesh(gFHXLines, _imFHXLinesMat, IM_STRUM_CAP);
-                imFHXLines.instanceMatrix.setUsage(T.DynamicDrawUsage);
-                imFHXLines.frustumCulled = false;
-                imFHXLines.renderOrder = 11;
-                _imColor.set(1, 1, 1);
-                imFHXLines.setColorAt(0, _imColor);
-                imFHXLines.instanceColor.setUsage(T.DynamicDrawUsage);
-                imFHXLines.count = 0;
-                noteG.add(imFHXLines);
-            }
-
-            // Pool-based strum-indicator replacements.  The IM approach above uses
-            // a fixed renderOrder per mesh type, which lets far-chord X marks overdraw
-            // gems/frames of nearer chords. Pools give per-chord Z-proportional renderOrder.
-            // Geometries are shared with the (now empty) IMs — MeshBasicMaterial
-            // ignores the instanceAlpha / instanceColor attributes on the geometry.
-            pPMXFill = pool(noteG, () => new T.Mesh(
-                gPMXFill,
-                new T.MeshBasicMaterial({
-                    color: 0x000000, transparent: true, opacity: 1,
-                    depthWrite: false, depthTest: false, fog: false, side: T.DoubleSide, forceSinglePass: true,
-                }),
-            ));
-            pFHXFill = pool(noteG, () => new T.Mesh(
-                gFHXFill,
-                new T.MeshBasicMaterial({
-                    color: 0x000000, transparent: true, opacity: 1,
-                    depthWrite: false, depthTest: false, fog: false, side: T.DoubleSide, forceSinglePass: true,
-                }),
-            ));
-            pMuteXLines = pool(noteG, () => new T.Mesh(
-                gPMXLines,
-                new T.MeshBasicMaterial({
-                    color: 0xffffff, transparent: true, opacity: 1,
-                    depthWrite: false, depthTest: false, fog: false, side: T.DoubleSide, forceSinglePass: true,
-                }),
-            ));
-            pFHXLines = pool(noteG, () => new T.Mesh(
-                gFHXLines,
-                new T.MeshBasicMaterial({
-                    color: 0xffffff, transparent: true, opacity: 1,
-                    depthWrite: false, depthTest: false, fog: false, side: T.DoubleSide, forceSinglePass: true,
-                }),
-            ));
-
-            pChordLbl   = pool(lblG,  () => new T.Sprite(txtMat('', '#e8d080', true, 'chord').clone()));
-            // Single shared barre material — all pool meshes reference it,
-            // so _applyGlow() can mutate emissiveIntensity once and every
-            // recycled / future-allocated barre mesh picks up the change.
-            mBarre = new T.MeshLambertMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.9 * glowMul, transparent: true, depthWrite: false });
-            pBarreLine  = pool(noteG, () => new T.Mesh(new T.BoxGeometry(1, 1, 1), mBarre));
-            // Shared 1×1×1 box geometry — brackets can require many pooled
-            // meshes per frame, so per-mesh BoxGeometry allocation would
-            // duplicate buffers and create unnecessary GPU disposal work.
-            // Disposed once in teardown (alongside the other shared geos).
-            if (!gArpBracket) gArpBracket = new T.BoxGeometry(1, 1, 1);
-            pArpBracket = pool(noteG, () => new T.Mesh(
-                gArpBracket,
-                new T.MeshBasicMaterial({
-                    color: 0xffffff,
-                    transparent: true,
-                    opacity: 1.0,
-                    depthWrite: false,
-                    depthTest: false,
-                    fog: false,
-                }),
-            ));
-
-            // Per-note fret number below note with connector line
-            pNoteFretLabel = pool(lblG, () => {
-                const _nfl = new T.Sprite(txtMat('0', FRET_LABEL_GOLD_HEX, false, 'noteFret').clone());
-                _nfl.material.fog = false;
-                _nfl.material.depthTest = false;
-                return _nfl;
-            });
-            // Teaching marks fg/sd labels (§6.2.2). One pool, two get()s per note
-            // (finger + degree); the texture is swapped per draw via material.map.
-            pTeachMarkLbl = pool(lblG, () => {
-                const _tml = new T.Sprite(txtMat('0', '#7fd1ff', false, 'teachMark').clone());
-                _tml.material.fog = false;
-                _tml.material.depthTest = false;
-                return _tml;
-            });
-            pConnectorLine = pool(noteG, () => new T.Line(
-                new T.BufferGeometry().setFromPoints([new T.Vector3(0, 0, 0), new T.Vector3(0, 1, 0)]),
-                new T.LineBasicMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.5, depthTest: false }),
-            ));
-            pDropLine = pool(noteG, () => new T.Line(
-                new T.BufferGeometry().setFromPoints([new T.Vector3(0, 0, 0), new T.Vector3(0, 1, 0)]),
-                new T.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 }),
-            ));
-
-            // Fret-column reference markers (visual cue for X-position to fret-number).
-            // Each sprite gets its own clone so the per-frame material.map swap
-            // (dark vs light grey) doesn't poison neighbours sharing the same
-            // cached texture map.
-            // fog:false prevents the scene fog from gradually dimming the sprite
-            // as it enters the far end of the highway — opacity is managed
-            // manually with a short fade-in so the number appears at its
-            // final size the moment it becomes visible rather than seeming to
-            // emerge from a tiny dim spec at the horizon.
-            pFretColMarker = pool(lblG, () => {
-                const _sp = new T.Sprite(txtMat('0', '#666666', false, 'noteFret').clone());
-                // fog=false: prevents scene fog from dimming the sprite as it enters the
-                // far end of the highway.  Opacity is managed by the manual fade-in ramp
-                // so the number appears smoothly instead of emerging as a dim spec.
-                _sp.material.fog = false;
-                return _sp;
-            });
-
-            // ── Pre-warm pools (feedBack#226) ─────────────────────────────
-            // Dense 7/8-string charts can outrun the lazy-grow path in the
-            // first 1-2s of playback, stalling those frames with `new T.Mesh`
-            // allocations *and* growing noteG forever (the pool only hides on
-            // reset). Pay the cost up front instead.
-            //
-            // Trade-off: pre-warming attaches the same meshes to noteG even
-            // on 4/6-string charts that may never use them all. The cost is
-            // paid at boardInit (during the load spinner — wall-clock time
-            // users were already waiting on), so the steady-state win on
-            // playback FPS is worth the init-time scene-graph footprint.
-            // Caps sized for a typical visible-window worst case (NOT the
-            // theoretical max across MAX_RENDER_STRINGS); lazy growth past
-            // the warm cap still works for genuinely dense outliers.
-            const _WARM_NOTE = 48;
-            const _WARM_CHORD = 12;
-            const _WARM_LANE = 32;
-            const _WARM_BEAT = 24;
-            pNote.warm(_WARM_NOTE);
-            pNoteEdge.warm(_WARM_NOTE);
-            pAccentHalo.warm(_WARM_NOTE);
-            pSus.warm(_WARM_NOTE);
-            pSusOutline.warm(_WARM_NOTE);
-            pSusRibbon.warm(_WARM_NOTE / 2);
-            pSusRibbonOl.warm(_WARM_NOTE / 2);
-            pTapChevron.warm(_WARM_CHORD);
-            pLbl.warm(_WARM_NOTE);
-            pSusRail.warm(_WARM_CHORD);
-            pSusRailBloom.warm(_WARM_CHORD);
-            pTechPlane.warm(_WARM_CHORD);
-            pNoteFretLabel.warm(_WARM_NOTE);
-            pTeachMarkLbl.warm(_WARM_NOTE);
-            pChordFrameFill.warm(_WARM_CHORD);
-            pChordBox.warm(_WARM_CHORD);
-            pChordLbl.warm(_WARM_CHORD);
-            pBarreLine.warm(_WARM_CHORD);
-            pArpBracket.warm(_WARM_CHORD);
-            pHaloBar.warm(_WARM_CHORD);
-            pFretLbl.warm(_WARM_LANE);
-            pLane.warm(_WARM_LANE * 2);  // anchor-driven lanes × time slices
-            pLaneDivider.warm(_WARM_LANE);
-            pGhostFretLbl.warm(_WARM_LANE);
-            pFretColMarker.warm(_WARM_LANE);
-            pConnectorLine.warm(_WARM_NOTE / 2);
-            pDropLine.warm(_WARM_NOTE / 2);
-            pBeat.warm(_WARM_BEAT);
-            pSec.warm(8);
-
-            _bgLoadSettings();
-            buildBoard();
-            // Apply the scene color theme now that settings + board exist. Sets
-            // the clear color + fog tint (board plane was themed in buildBoard).
-            // For the default theme this is identical to the hardcoded values
-            // initScene seeded above, so nothing changes for existing users.
-            _applyBgTheme();
-
-            // Background animations (#13). Read settings keyed by this
-            // panel and mount the active style's meshes. Subscribe to
-            // in-app settings changes (settings.html via window.h3dBgSet*)
-            // so they propagate without a reload. Manual localStorage
-            // edits don't fire the pub-sub and require a reload.
-            // Push the freshly-loaded vibrancy/glow values into the
-            // materials. _bgLoadSettings only triggers a palette re-apply
-            // when the palette ID actually changed, so a fresh-init user
-            // on the default palette would otherwise keep the hardcoded
-            // construction-time material values until they touched a
-            // slider.
-            _applyVibrancy();
-            _applyGlow();
-            // inlayLabelsVisible was applied before buildBoard() via _bgLoadSettings.
-            bgGroup = new T.Group();
-            // Note: renderOrder on a Group is a no-op (Three.js Groups
-            // are transforms, not rendered objects, so renderOrder only
-            // affects the actual meshes inside). _bgMountStyle stamps
-            // renderOrder = -1 on every child after build, which IS what
-            // forces background to render before gameplay geometry.
-            // Combined with the deeper-than-note-range placements below,
-            // background never paints over notes.
-            scene.add(bgGroup);
-            _bgMountStyle();
-            _bgListener = (changedKey) => {
-                if (changedKey === 'fretSpacing') {
-                    // _h3dFretUniform + the fretX-derived scalars were already
-                    // updated globally in h3dSetFretSpacing. Rebuild this
-                    // panel's static board geometry (fret wires, lanes, inlays)
-                    // so it re-lays-out for the new spacing; per-frame note
-                    // geometry reads fretX live and needs no rebuild.
-                    if (fretG) buildBoard();
-                    return;
-                }
-                if (changedKey === 'inlayLabelsVisible') {
-                    _bgLoadSettings();
-                    // Flip visibility on the already-built sprites; no
-                    // need to rebuild the board (cheaper, preserves the
-                    // shared materials and avoids palette re-apply churn).
-                    for (const lbl of _inlayLabels) lbl.visible = inlayLabelsVisible;
-                    return;
-                }
-                if (changedKey === 'nutHeadstockVisible') {
-                    _bgLoadSettings();
-                    if (nutHeadstockGroup) nutHeadstockGroup.visible = nutHeadstockVisible;
-                    return;
-                }
-                if (changedKey === 'tuningLabelsVisible') {
-                    _bgLoadSettings();
-                    _lastOpenStringLblSig = '';
-                    if (_tuningLabelSprites.length) _disposeOpenStringPitchSprites();
-                    return;
-                }
-                if (changedKey === 'nutColor' || changedKey === 'headstockColor') {
-                    _bgLoadSettings();
-                    if (fretG) buildBoard();
-                    for (const lbl of _inlayLabels) lbl.visible = inlayLabelsVisible;
-                    return;
-                }
-                if (changedKey === 'reactive' || changedKey === 'showFretOnNote' ||
-                    changedKey === 'fretNumberGhostScope' ||
-                    changedKey === 'cameraSmoothing' || changedKey === 'zoomSmoothing' ||
-                    changedKey === 'tiltSmoothing' || changedKey === 'cameraLockLow' ||
-                    changedKey === 'cameraLockZoom' || changedKey === 'cameraMode' ||
-                    changedKey === 'textSize' ||
-                    changedKey === 'chordDiagramSize' || changedKey === 'chordDiagramPosition' ||
-                    changedKey === 'fretColumnMarkerCadence' ||
-                    changedKey === 'sectionLabelsOnHighway' ||
-                    changedKey === 'sectionHudVisible' ||
-                    changedKey === 'sectionHudPosition' ||
-                    changedKey === 'sectionHudSize' ||
-                    changedKey === 'toneHudVisible' ||
-                    changedKey === 'toneHudPosition' ||
-                    changedKey === 'toneHudSize' ||
-                    changedKey === 'projectionVisible' ||
-                    changedKey === 'slideArrowApproachVisible' ||
-                    changedKey === 'slideArrowNeckVisible' ||
-                    changedKey === 'slideArrowChainPreviewVisible') {
-                    // Flag flips don't need a mesh rebuild — just refresh
-                    // the per-instance state for the next frame to consult.
-                    // Same shape for showFretOnNote (#12), cameraSmoothing
-                    // (#34), the zoom/tilt smoothing follow-ups, and
-                    // cameraLockLow — all read per-frame in update() /
-                    // camUpdate().
-                    _bgLoadSettings();
-                    return;
-                }
-                if (changedKey === 'vibrancy') {
-                    _bgLoadSettings();
-                    _applyVibrancy();
-                    return;
-                }
-                if (changedKey === 'glow') {
-                    _bgLoadSettings();
-                    _applyGlow();
-                    return;
-                }
-                if (changedKey === 'palette') {
-                    // Palette change has three effects:
-                    //  1. _bgLoadSettings -> _applyPaletteToMaterials
-                    //     retints the per-instance shared materials
-                    //     (notes, glows, sustain trails, projection).
-                    //  2. buildBoard rebuilds the fretboard meshes
-                    //     (LineBasicMaterial lane lines + per-string
-                    //     BoxGeometry materials). These are created at
-                    //     build time with palette-baked colors and
-                    //     aren't reachable from _applyPaletteToMaterials.
-                    //  3. lights bg style bakes palette colors into
-                    //     sprite quads at build time, so it needs a
-                    //     full mesh rebuild — fire _bgRebuild when
-                    //     that style is active.
-                    _bgLoadSettings();
-                    if (fretG) buildBoard();
-                    if (bgStyleId === 'lights') _bgRebuild();
-                    return;
-                }
-                if (changedKey === 'bgTheme' || changedKey === 'hwTheme') {
-                    // A scene-color axis changed (background = bgTheme:
-                    // clear+fog; highway = hwTheme: board plane + lane). Recolor
-                    // in place — no mesh rebuild needed (the board plane material
-                    // is mutated via _boardPlaneMat, the lane via mLaneOdd/Even).
-                    // _applyBgTheme reapplies both axes from their own keys, so
-                    // changing one dropdown retints only its half.
-                    _bgLoadSettings();
-                    _applyBgTheme();
-                    return;
-                }
-                if (changedKey === 'customImageDataUrl') {
-                    // Asset bytes changed. Rebuild only when the image
-                    // style is active — otherwise the new bytes will
-                    // pick up next time the user picks `image`.
-                    _bgLoadSettings();
-                    if (bgStyleId === 'image') _bgRebuild();
-                    return;
-                }
-                if (changedKey === 'customImageName') {
-                    // Display-only metadata; no mesh rebuild.
-                    _bgLoadSettings();
-                    return;
-                }
-                if (changedKey === 'customVideoName') {
-                    // Filename change → new <video> source. Rebuild
-                    // only when the video style is currently active;
-                    // otherwise the new bytes pick up next time the
-                    // user picks `video`.
-                    _bgLoadSettings();
-                    if (bgStyleId === 'video') _bgRebuild();
-                    return;
-                }
-                if (changedKey === 'intensity') {
-                    _bgLoadSettings();
-                    // Image style reads s.intensity per frame inside
-                    // update() to scale the drift speed, so a live
-                    // mutation is enough — no need to tear down and
-                    // re-decode the texture for every slider change.
-                    // The procedural styles bake intensity into mesh
-                    // count, opacity, and size at build time, so they
-                    // still need a full rebuild.
-                    if (bgStyleId === 'image' && bgState) {
-                        bgState.intensity = bgIntensity;
-                        return;
-                    }
-                    _bgRebuild();
-                    return;
-                }
-                if (changedKey === 'venueScene') {
-                    _bgRebuild();
-                    return;
-                }
-                if (changedKey === 'venueInstrumentPov') {
-                    if (_bgEffectiveStyleId() === 'venue' && bgState) {
-                        _venueSwapPlateIfNeeded(bgState);
-                    }
-                    return;
-                }
-                if (!changedKey || changedKey === 'style') {
-                    _bgRebuild();
-                }
-            };
-            _bgSubscribe(_bgListener);
-
-            // Notedetect feedback (#9). Listen for hit/miss events on
-            // window. Notedetect dispatches both globally and on its
-            // instanceRoot; the global fire is fine for our case since
-            // each 3dhighway panel just stores any event into its own
-            // queue and renders only the matching note. Listeners are
-            // per-panel so destroy() can cleanly remove them; cost is
-            // a per-event branch + push, negligible vs per-frame work.
-            // Validate every payload field we'll later compare against
-            // chart-data fields (s, f, t). drawNote compares with
-            // Math.abs(m.noteTime - n.t) and trusts the values are
-            // finite, so reject any payload missing one of those
-            // fields here rather than letting bogus data into the
-            // arrays. Prune expired marks on every push so the arrays
-            // settle back to empty when notedetect stops emitting —
-            // drawNote's fast-path short-circuit
-            // (`if (_ndHitMarks.length || _ndMissMarks.length)`) only
-            // works if expired entries don't linger.
-            const _ndNormalizeMark = (d) => {
-                if (!d) return null;
-                const note = d.note || d.chartNote;
-                if (!note) return null;
-                if (!Number.isFinite(note.s) || !Number.isFinite(note.f) || !Number.isFinite(d.noteTime)) return null;
-                const labels = [];
-                if (d.timingState && d.timingState !== 'OK' && Number.isFinite(d.timingError)) {
-                    labels.push({
-                        text: `${d.timingState === 'EARLY' ? '↑' : '↓'} ${d.timingError > 0 ? '+' : ''}${d.timingError}ms`,
-                        color: '#ffb347',
-                    });
-                }
-                if (d.pitchState && d.pitchState !== 'OK' && Number.isFinite(d.pitchError)) {
-                    labels.push({
-                        text: `${d.pitchState === 'SHARP' ? '♯' : '♭'} ${d.pitchError > 0 ? '+' : ''}${d.pitchError}¢`,
-                        color: '#66c7ff',
-                    });
-                }
-                return { s: note.s, f: note.f, noteTime: d.noteTime, labels, timingState: d.timingState || null };
-            };
-            const _ndPushMark = (arr, d) => {
-                const mark = _ndNormalizeMark(d);
-                if (!mark) return arr;
-                const now = performance.now();
-                // Prune expired entries unconditionally. The dedupe path
-                // below can extend expiresAt of any entry (including arr[0]),
-                // so an arr[0] gate is not reliable — it would prevent
-                // pruning entries that expired behind a refreshed front
-                // entry, allowing the array to grow unbounded. These arrays
-                // are tiny (a handful of marks at most), so an unconditional
-                // filter() is negligible and always correct.
-                if (arr.length !== 0) {
-                    const live = arr.filter(m => m.expiresAt > now);
-                    arr.length = 0;
-                    if (live.length) arr.push(...live);
-                }
-                const existing = arr.find(m =>
-                    m.s === mark.s && m.f === mark.f && Math.abs(m.noteTime - mark.noteTime) < _ND_TIME_EPS
-                );
-                if (existing) {
-                    existing.labels = mark.labels.length ? mark.labels : existing.labels;
-                    existing.expiresAt = Math.max(existing.expiresAt, now + _ND_TTL_MS);
-                    return arr;
-                }
-                arr.push({ ...mark, expiresAt: now + _ND_TTL_MS });
-                return arr;
-            };
-            _ndOnHit = (e) => { _ndHitMarks = _ndPushMark(_ndHitMarks, e.detail); };
-            _ndOnMiss = (e) => { _ndMissMarks = _ndPushMark(_ndMissMarks, e.detail); };
-            window.addEventListener('notedetect:hit', _ndOnHit);
-            window.addEventListener('notedetect:miss', _ndOnMiss);
-            if (window.feedBack &&
-                    typeof window.feedBack.on  === 'function' &&
-                    typeof window.feedBack.off === 'function') {
-                _ndOnBusHit  = (e) => { _ndHitMarks  = _ndPushMark(_ndHitMarks,  e.detail); };
-                _ndOnBusMiss = (e) => { _ndMissMarks = _ndPushMark(_ndMissMarks, e.detail); };
-                window.feedBack.on('note:hit', _ndOnBusHit);
-                window.feedBack.on('note:miss', _ndOnBusMiss);
-            }
-
-            /* ── h3d-carve-10: score-FX init → fxInit() in src/score-fx.js */
-            fxInit();
-
-            return true;
-        }
-
-        function _bgLoadSettings() {
-            const panelKey = _bgPanelKey(highwayCanvas);
-            bgStyleId = _bgReadSetting(panelKey, 'style');
-            bgIntensity = _bgReadSetting(panelKey, 'intensity');
-            bgReactive = _bgReadSetting(panelKey, 'reactive');
-            // Per-render opt-out (captured from the mount bundle in init): force
-            // the reactive background off for THIS instance, overriding the shared
-            // setting without writing it back. Re-applied here so it sticks across
-            // setting reloads.
-            if (_bgReactiveOptOut) bgReactive = false;
-            if (bgStyleId === 'butterchurn') bgReactive = false; // Butterchurn owns the <audio> tap
-            const newPaletteId = _bgReadSetting(panelKey, 'palette');
-            let newPalette;
-            if (newPaletteId === 'custom') {
-                // Resolve user colors into the stable _customPalette array,
-                // mutated in place so the reference identity is preserved.
-                let stored = null;
-                const raw = _bgReadSetting(panelKey, 'customColors');
-                if (typeof raw === 'string') { try { stored = JSON.parse(raw); } catch (_) { /* corrupt */ } }
-                for (let i = 0; i < _customPalette.length; i++) {
-                    const v = Array.isArray(stored) ? _h3dHexToInt(stored[i]) : null;
-                    _customPalette[i] = (v != null) ? v : PALETTES.default[i];
-                }
-                newPalette = _customPalette;
-            } else {
-                newPalette = PALETTES[newPaletteId] || PALETTES.default;
-            }
-            // Signature guards the in-place custom case: when the user edits a
-            // color the reference stays === activePalette, so compare contents
-            // too to force a retint. _bgPaletteSig caches the applied colors.
-            const newSig = newPalette.join(',');
-            if (newPalette !== activePalette || newSig !== _bgPaletteSig) {
-                activePalette = newPalette;
-                _bgPaletteSig = newSig;
-                _applyPaletteToMaterials();
-            }
-            bgThemeId = _bgReadSetting(panelKey, 'bgTheme');
-            // Highway axis. ONE-TIME BACKWARD-COMPAT BACKFILL: the first time we
-            // load with no stored hwTheme (pre-split installs, or anyone who only
-            // ever touched the old single "Scene colors" control), seed hwTheme
-            // FROM the background pick AND PERSIST it, so an existing 'cathode'
-            // selection looks byte-identical right after the upgrade. Persisting
-            // immediately (rather than re-inheriting on every read) is what keeps
-            // the two axes truly INDEPENDENT thereafter: once hwTheme is stored,
-            // changing the Background dropdown no longer drags the Highway
-            // surface along, and the settings UI's Highway value can never
-            // disagree with what's rendered. Written without _bgEmitChange so the
-            // backfill can't re-enter the change listener.
-            if (_bgHasStored(panelKey, 'hwTheme')) {
-                hwThemeId = _bgReadSetting(panelKey, 'hwTheme');
-            } else {
-                hwThemeId = bgThemeId;
-                _bgMemFallback.hwTheme = String(bgThemeId);
-                try { localStorage.setItem('h3d_bg_hwTheme', String(bgThemeId)); } catch (_) { /* storage blocked — mem fallback still seeds the read */ }
-            }
-            showFretOnNote = _bgReadSetting(panelKey, 'showFretOnNote');
-            fretNumberGhostScope = _bgReadSetting(panelKey, 'fretNumberGhostScope');
-            cameraSmoothing = _bgReadSetting(panelKey, 'cameraSmoothing');
-            // Mirror-at-first-read: zoom + tilt sliders inherit cameraSmoothing
-            // when the user has never explicitly written them. Once the user
-            // moves either slider, the corresponding _bgHasStored() flips
-            // true and the read becomes independent.
-            zoomSmoothing = _bgHasStored(panelKey, 'zoomSmoothing')
-                ? _bgReadSetting(panelKey, 'zoomSmoothing')
-                : cameraSmoothing;
-            tiltSmoothing = _bgHasStored(panelKey, 'tiltSmoothing')
-                ? _bgReadSetting(panelKey, 'tiltSmoothing')
-                : cameraSmoothing;
-            cameraLockLow = _bgReadSetting(panelKey, 'cameraLockLow');
-            cameraLockZoom = _bgReadSetting(panelKey, 'cameraLockZoom');
-            cameraMode = _bgReadSetting(panelKey, 'cameraMode');
-            textSize             = _bgReadSetting(panelKey, 'textSize');
-            vibrancy             = _bgReadSetting(panelKey, 'vibrancy');
-            glowMul              = _bgReadSetting(panelKey, 'glow');
-            _hitFx               = _bgReadSetting(panelKey, 'hitFx');
-            _sparks              = _bgReadSetting(panelKey, 'sparks');
-            _cinematic           = _bgReadSetting(panelKey, 'cinematic');
-            _verdictMarks        = _bgReadSetting(panelKey, 'verdictMarks');
-            _timingFx            = _bgReadSetting(panelKey, 'timingFx');
-            _streakFx            = _bgReadSetting(panelKey, 'streakFx');
-            _bloom               = _bgReadSetting(panelKey, 'bloom');
-            _applyCinematic();
-            fpsVisible           = _bgReadSetting(panelKey, 'fpsVisible');
-            fretDividersVisible  = _bgReadSetting(panelKey, 'fretDividersVisible');
-            chordDiagramVisible  = _bgReadSetting(panelKey, 'chordDiagramVisible');
-            chordDiagramSize     = _bgReadSetting(panelKey, 'chordDiagramSize');
-            chordDiagramPosition = _bgReadSetting(panelKey, 'chordDiagramPosition');
-            fretColumnMarkerCadence = _bgReadSetting(panelKey, 'fretColumnMarkerCadence');
-            inlayLabelsVisible = _bgReadSetting(panelKey, 'inlayLabelsVisible');
-            sectionLabelsOnHighway = _bgReadSetting(panelKey, 'sectionLabelsOnHighway');
-            sectionHudVisible      = _bgReadSetting(panelKey, 'sectionHudVisible');
-            sectionHudPosition     = _bgReadSetting(panelKey, 'sectionHudPosition');
-            sectionHudSize         = _bgReadSetting(panelKey, 'sectionHudSize');
-            toneHudVisible         = _bgReadSetting(panelKey, 'toneHudVisible');
-            toneHudPosition        = _bgReadSetting(panelKey, 'toneHudPosition');
-            toneHudSize            = _bgReadSetting(panelKey, 'toneHudSize');
-            nutHeadstockVisible    = _bgReadSetting(panelKey, 'nutHeadstockVisible');
-            tuningLabelsVisible    = _bgReadSetting(panelKey, 'tuningLabelsVisible');
-            nutColor               = _bgReadSetting(panelKey, 'nutColor');
-            headstockColor         = _bgReadSetting(panelKey, 'headstockColor');
-            projectionVisible      = _bgReadSetting(panelKey, 'projectionVisible');
-            slideArrowApproachVisible = _bgReadSetting(panelKey, 'slideArrowApproachVisible');
-            slideArrowNeckVisible     = _bgReadSetting(panelKey, 'slideArrowNeckVisible');
-            slideArrowChainPreviewVisible = _bgReadSetting(panelKey, 'slideArrowChainPreviewVisible');
-            _vibrancyIdleOp = 0.4  + 0.6  * vibrancy;
-            _vibrancyProjOp = 0.15 + 0.35 * vibrancy;
-            // Custom image asset is a single GLOBAL slot — bytes are
-            // shared across panels (per-panel choice is which style
-            // each panel renders, not which asset). Reading via
-            // _bgReadSetting would let a stray h3d_bg_panel<idx>_*
-            // override silently re-introduce the per-panel asset
-            // duplication this design deliberately avoids (and
-            // h3dBgClearCustomImage wouldn't reach those overrides).
-            // Read globals directly instead.
-            //
-            // Precedence: in-memory fallback BEFORE localStorage. The
-            // setter always populates _bgMemFallback (even when the
-            // localStorage write fails on quota), so the fallback
-            // holds the most-recent staged value. Reading localStorage
-            // first would mean a failed write leaves the renderer
-            // pointed at the previous asset while settings.html shows
-            // a "session-only" warning claiming the new bytes are in
-            // effect — UI and renderer would silently disagree.
-            const memDataUrl = _bgMemFallback.customImageDataUrl;
-            const memName    = _bgMemFallback.customImageName;
-            try {
-                const gDataUrl = (memDataUrl !== undefined) ? memDataUrl : localStorage.getItem('h3d_bg_customImageDataUrl');
-                const gName    = (memName    !== undefined) ? memName    : localStorage.getItem('h3d_bg_customImageName');
-                bgCustomImageDataUrl = (gDataUrl != null) ? gDataUrl : BG_DEFAULTS.customImageDataUrl;
-                bgCustomImageName    = (gName    != null) ? gName    : BG_DEFAULTS.customImageName;
-            } catch (_) {
-                bgCustomImageDataUrl = (memDataUrl !== undefined) ? memDataUrl : BG_DEFAULTS.customImageDataUrl;
-                bgCustomImageName    = (memName    !== undefined) ? memName    : BG_DEFAULTS.customImageName;
-            }
-            // Custom video filename: also a single global slot, same
-            // mem-first precedence as the image keys (a quota-failed
-            // setItem leaves _bgMemFallback ahead of localStorage).
-            const memVideoName = _bgMemFallback.customVideoName;
-            try {
-                const gVideoName = (memVideoName !== undefined) ? memVideoName : localStorage.getItem('h3d_bg_customVideoName');
-                bgCustomVideoName = (gVideoName != null) ? gVideoName : BG_DEFAULTS.customVideoName;
-            } catch (_) {
-                bgCustomVideoName = (memVideoName !== undefined) ? memVideoName : BG_DEFAULTS.customVideoName;
-            }
-        }
-        // Live-swap palette by mutating existing materials in place.
-        // Three.js colors propagate to all sharing meshes on the next
-        // render — no rebuild, no GC. The mGlow material was authored
-        // with .color = white and the per-string color in .emissive
-        // only; we preserve that here so the glow look stays consistent
-        // before/after a palette swap rather than tinting the diffuse
-        // white. Lane lines and drop lines that read
-        // activePalette[s] per frame pick up automatically. Per-string
-        // fretboard materials built inside buildBoard() are independent
-        // and aren't reachable from here — buildBoard re-runs from the
-        // palette listener to regenerate them with the new colors.
-        //
-        // projMeshArr holds filled rim meshes (ExtrudeGeometry frame); centre
-        // is open. Palette + vibrancy mutate each mesh's material like mStr.
-        function _applyPaletteToMaterials() {
-            for (let s = 0; s < activePalette.length; s++) {
-                const c = activePalette[s];
-                if (mStr[s]) {
-                    // Gradient strings (0..5) keep a white base so the per-vertex
-                    // colours in gNoteGrad[s] show pure; only flat strings (6/7)
-                    // take the palette colour. mStr is MeshBasicMaterial (no
-                    // emissive) — guard the legacy emissive retint.
-                    if (s >= 6) mStr[s].color.setHex(c);
-                    if (mStr[s].emissive) mStr[s].emissive.setHex(c);
-                }
-                if (mGlow[s]) mGlow[s].emissive.setHex(c);
-                if (mRimFlash[s]) {
-                    mRimFlash[s].color.setHex(c);
-                    mRimFlash[s].emissive.setHex(c);
-                }
-                if (mSus[s]) mSus[s].color.setHex(c);
-                if (mStrHitOutline[s]) {
-                    mStrHitOutline[s].color.setHex(c);
-                    mStrHitOutline[s].emissive.setHex(c);
-                }
-                if (mAccentOutline[s]) {
-                    mAccentOutline[s].color.setHex(c);
-                    mAccentOutline[s].emissive.setHex(c);
-                }
-                if (mAccentCore[s]) mAccentCore[s].emissive.setHex(c);
-                // Verdict materials use fixed colours (0x22ff88 hit, 0xff0066 miss)
-                // that are independent of the string palette — no retint needed.
-                for (const haloArr of [mAccentHaloNear, mAccentHaloMid, mAccentHaloFar]) {
-                    if (haloArr[s]) haloArr[s].color.setHex(c);
-                }
-                if (projMeshArr && projMeshArr[s]) {
-                    for (const pm of projMeshArr[s]) {
-                        if (pm.material) {
-                            pm.material.color.setHex(c);
-                            pm.material.emissive.setHex(c);
-                        }
-                    }
-                }
-            }
-            // Per-string gem bodies (strings 0..5) are a baked per-vertex
-            // gradient (gNoteGrad), not a flat material — recolor them too so a
-            // custom palette reaches the note/sustain/vibrato gem bodies.
-            _recolorGemGradients();
-            // Re-apply vibrancy: mGlow's color is a lerp between white and
-            // the palette colour, so a palette swap must rebuild that
-            // lerp from the new endpoints. Skipped pre-init when mGlow
-            // isn't allocated yet — _applyVibrancy() guards on that.
-            _applyVibrancy();
-        }
-
-        // Recompute the per-vertex gem-gradient colors from the active palette.
-        // Built-in palettes (and unchanged slots of a custom palette) keep the
-        // hand-tuned DEFAULT_GEM_GRADIENTS stops so the stock look is preserved;
-        // a custom slot derives a top-highlight / bottom-shade from its base
-        // color. Mutates the existing 'color' attribute in place (no geometry
-        // churn, pooled note meshes pick it up next frame).
-        function _recolorGemGradients() {
-            if (!T || !gNoteGrad || !gNoteGrad.length) return;
-            const isCustom = (activePalette === _customPalette);
-            const topCol = new T.Color(), botCol = new T.Color(), tmp = new T.Color();
-            const halfH = NH / 2;
-            for (let s = 0; s < gNoteGrad.length; s++) {
-                const g = gNoteGrad[s];
-                if (!g || !g.attributes || !g.attributes.color) continue;
-                const base = activePalette[s];
-                let topHex, botHex;
-                if (isCustom && base !== PALETTES.default[s]) {
-                    // Match the SUBTLE stock gem shading (bottom ≈ 0.78 of a
-                    // near-base top), so a custom gem reads as a flat-ish gem
-                    // in the chosen color rather than a strong gradient.
-                    topHex = _lightenInt(base, 0.05);
-                    botHex = _darkenInt(base, 0.78);
-                } else {
-                    const stops = DEFAULT_GEM_GRADIENTS[s];
-                    if (!stops) continue; // strings 6/7 have no gradient geometry
-                    topHex = stops[0];
-                    botHex = stops[1];
-                }
-                topCol.setHex(topHex);
-                botCol.setHex(botHex);
-                const pos = g.attributes.position;
-                const colAttr = g.attributes.color;
-                for (let i = 0; i < pos.count; i++) {
-                    const t = (pos.getY(i) + halfH) / (2 * halfH); // 0 bottom..1 top
-                    tmp.copy(botCol).lerp(topCol, t);
-                    colAttr.setXYZ(i, tmp.r, tmp.g, tmp.b);
-                }
-                colAttr.needsUpdate = true;
-            }
-        }
-
-        // Vibrancy + glow live-update helpers. Both walk the same
-        // material set _applyPaletteToMaterials walks (plus the static
-        // outline / technique materials) and mutate uniform-backed
-        // properties — colour, opacity, emissiveIntensity. No
-        // material.needsUpdate flag is needed for these; Three.js
-        // re-reads them on the next render call. mGlow.emissiveIntensity
-        // and BASE_GLOW/MAX_GLOW/IDLE_OP are NOT written here — those
-        // are stomped per-frame inside updateStringHighlights() and the
-        // anticipation loop in update(), so they read glowMul /
-        // _vibrancyIdleOp / vibrancy directly each frame instead.
-        function _applyVibrancy() {
-            const t = vibrancy;
-            const idleOp     = 0.4  + 0.6  * t;  // mStr / IDLE_OP source
-            // projIdleOp drives the projMeshArr ghost-frame opacity and is
-            // read by drawNote() as `_vibrancyProjOp`, which layers a
-            // per-frame factor on top.
-            const projIdleOp = 0.15 + 0.35 * t;
-            const susOp      = 0.35 + 0.45 * t;  // mSus
-            const lineGlowOp = 0.15 + 0.35 * t;  // thin Line glow layer behind each string
-            for (let s = 0; s < activePalette.length; s++) {
-                if (mStr[s])  mStr[s].opacity  = idleOp;
-                if (mSus[s])  mSus[s].opacity  = susOp;
-                if (mGlow[s]) {
-                    // Hit-note body lerps from white (current pastel
-                    // look — colour comes through the emissive only)
-                    // toward the palette colour as vibrancy → 1, so at
-                    // vibrancy=1 the white-wash on hit notes goes away.
-                    if (!_paletteColorTmp && T) _paletteColorTmp = new T.Color();
-                    if (_paletteColorTmp) {
-                        mGlow[s].color.setHex(0xffffff).lerp(_paletteColorTmp.setHex(activePalette[s]), t);
-                    }
-                }
-                if (mAccentCore[s]) {
-                    if (!_paletteColorTmp && T) _paletteColorTmp = new T.Color();
-                    if (_paletteColorTmp) {
-                        mAccentCore[s].color.setHex(0xffffff).lerp(_paletteColorTmp.setHex(activePalette[s]), t);
-                    }
-                }
-                if (projMeshArr && projMeshArr[s]) {
-                    for (const pm of projMeshArr[s]) {
-                        if (pm.material) pm.material.opacity = projIdleOp;
-                    }
-                }
-            }
-            // stringLines[s].material.opacity is overwritten by
-            // updateStringHighlights() every frame, so the closed-form
-            // value would be stomped. updateStringHighlights() reads
-            // _vibrancyIdleOp directly instead — keep that in sync.
-            for (let s = 0; s < stringLineGlows.length; s++) {
-                const line = stringLineGlows[s];
-                if (line && line.material) line.material.opacity = lineGlowOp;
-            }
-            _vibrancyIdleOp = idleOp;
-            _vibrancyProjOp = projIdleOp;
-        }
-        function _applyGlow() {
-            const g = glowMul;
-            for (let s = 0; s < activePalette.length; s++) {
-                if (mStr[s])  mStr[s].emissiveIntensity  = 0.002 * g;
-                // mGlow[s].emissiveIntensity is per-frame in update();
-                // see Phase 4 comment block.
-                if (projMeshArr && projMeshArr[s]) {
-                    for (const pm of projMeshArr[s]) {
-                        if (pm.material) pm.material.emissiveIntensity = 0.002 * g;
-                    }
-                }
-                if (mStrHitOutline[s]) mStrHitOutline[s].emissiveIntensity = 1.0 * g;
-                if (mAccentOutline[s]) mAccentOutline[s].emissiveIntensity = ACCENT_RIM_BASE_EMISSIVE * g;
-                // mAccentCore[].emissiveIntensity is per-frame in update()
-                // alongside mGlow (accent fill boost).
-            }
-            if (mWhiteOutline) mWhiteOutline.emissiveIntensity = 0.6 * g;
-            if (mMissOutline)  mMissOutline.emissiveIntensity  = 1.2 * g;
-            for (let s = 0; s < mHitBright.length; s++) {
-                if (mHitBright[s]) mHitBright[s].emissiveIntensity = 4.0 * g;
-            }
-            if (mSusOutline)      mSusOutline.emissiveIntensity      = 0.3 * g;
-            if (mHitSusOutline)   mHitSusOutline.emissiveIntensity   = 0.7 * g;
-            if (mTapChevron)   mTapChevron.emissiveIntensity   = 0.9 * g;
-            if (mBarre)        mBarre.emissiveIntensity        = 0.9 * g;
-            for (let si = 0; si < activePalette.length; si++) {
-                if (mAccentHaloNear[si]) mAccentHaloNear[si].opacity = ACCENT_HALO_OP_NEAR * g;
-                if (mAccentHaloMid[si]) mAccentHaloMid[si].opacity = ACCENT_HALO_OP_MID * g;
-                if (mAccentHaloFar[si]) mAccentHaloFar[si].opacity = ACCENT_HALO_OP_FAR * g;
-            }
-        }
-        function _bgEffectiveStyleId() {
-            return _venueSceneOverride ? 'venue' : bgStyleId;
-        }
-        // The 'butterchurn' bg-style renders a WebGL MilkDrop canvas BEHIND a
-        // transparent highway via the self-contained _bc* controller (top of file),
-        // NOT a Three.js fog-scenery style (its scenery falls back to 'off'). Mount
-        // is idempotent and driven by the bg-style dropdown through _bgMountStyle.
-        function _bcActive() { return bgStyleId === 'butterchurn'; }
-        function _bcSyncMode() {
-            if (_bcActive()) {
-                // Recreate when there's no controller, or the last one died during
-                // async init (lib/WebGL failure) — a dead controller self-cleaned,
-                // so retry here instead of leaving the style permanently broken.
-                if ((!bcCtrl || (bcCtrl.dead && bcCtrl.dead())) && wrap) {
-                    if (bcCtrl) bcCtrl = null;
-                    // audioProvider reuses this instance's shared analyser (the
-                    // fog scenery's #audio / stems tap) so the browser path never
-                    // opens a second createMediaElementSource on #audio.
-                    try { bcCtrl = _bcCreateController(wrap, () => canvasSize(highwayCanvas), () => { try { return _bgGetAnalyser(); } catch (e) { return null; } }); }
-                    catch (e) { console.warn('[3D-Hwy] Butterchurn init failed', e); }
-                }
-                if (ren) ren.setClearColor(0x101820, 0); // transparent so the visualizer shows through
-            } else if (bcCtrl) {
-                try { bcCtrl.destroy(); } catch (e) {}
-                bcCtrl = null;
-                _applyBgTheme(); // restore the opaque themed clear
-            }
-        }
-        function _bgMountStyle() {
-            const effectiveId = _bgEffectiveStyleId();
-            const style = BG_STYLES[effectiveId] || BG_STYLES.off;
-            // Build into a fresh stage group so a partial throw can't
-            // orphan meshes inside bgGroup. On success the stage joins
-            // bgGroup atomically; on failure the stage and everything
-            // in it are disposed and bgState stays null.
-            const stage = new T.Group();
-            let result = null;
-            try {
-                result = style.build(stage, {
-                    intensity: bgIntensity,
-                    palette: activePalette,
-                    customImageDataUrl: bgCustomImageDataUrl,
-                    customVideoName: bgCustomVideoName,
-                    cam: cam,
-                }) || null;
-            } catch (e) {
-                console.error('[3D-Hwy] bg style build failed', effectiveId, e);
-                _bgDisposeGroupTree(stage);
-                bgState = null;
-                bgStage = null;
-                bgMountedStyleId = null;
-                return;
-            }
-            // renderOrder on a Group doesn't propagate to its children
-            // (Three.js sorts by per-object renderOrder, and a Group is a
-            // transform, not a rendered object). Stamp every mesh in the
-            // stage so transparent bg objects always sort behind notes
-            // regardless of their z relative to gameplay geometry.
-            stage.traverse((c) => { c.renderOrder = -1; });
-            bgGroup.add(stage);
-            bgStage = stage;
-            bgState = result;
-            bgMountedStyleId = effectiveId;
-            _bcSyncMode();
-        }
-        function _bgUnmountStyle() {
-            const mountedId = bgMountedStyleId || _bgEffectiveStyleId();
-            const style = BG_STYLES[mountedId] || BG_STYLES.off;
-            try { style.teardown(bgState); } catch (e) { console.error('[3D-Hwy] bg teardown', e); }
-            bgState = null;
-            // Belt + suspenders: even if a style's teardown forgets to
-            // dispose something, the stage tree dispose mops up.
-            if (bgStage) {
-                bgStage.parent?.remove(bgStage);
-                _bgDisposeGroupTree(bgStage);
-                bgStage = null;
-            }
-            bgMountedStyleId = null;
-        }
-        // Recursively dispose geometries / materials attached to an
-        // Object3D tree, then detach. Used as a safety net during
-        // _bgMountStyle failures and on _bgUnmountStyle.
-        //
-        // Deliberately does NOT dispose material.map textures — texture
-        // lifetime belongs to whoever allocated the texture. The
-        // silhouettes style allocates a per-layer CanvasTexture wrapping
-        // the shared _silCanvas bitmap, and disposes those textures in
-        // its own teardown. Disposing them here would double-dispose,
-        // and any future plugin texture sharing across panels (e.g. an
-        // upcoming custom-background feature) would break the same way.
-        // Style teardown owns texture release.
-        function _bgDisposeGroupTree(obj) {
-            if (!obj) return;
-            obj.traverse((child) => {
-                child.geometry?.dispose?.();
-                const mat = child.material;
-                if (mat) {
-                    const mats = Array.isArray(mat) ? mat : [mat];
-                    for (const m of mats) m?.dispose?.();
-                }
-            });
-            obj.parent?.remove(obj);
-        }
-        function _bgRebuild() {
-            if (!bgGroup) return;
-            // Order matters: teardown must run against the (style id,
-            // state) pair that built the meshes, so unmount BEFORE
-            // reloading settings. Reload, then mount with the new id.
-            _bgUnmountStyle();
-            _bgLoadSettings();
-            _bgMountStyle();
-            _bgApplyVenueSceneFog(_venueSceneOverride);
-            // Reset dt accounting so the first frame after a switch
-            // doesn't see a huge "since last update" window — that
-            // would clamp to 0.1 and visibly snap motion / rotation.
-            _bgLastT = 0;
-        }
-        // Venue-only fog/clear/ambient tuning — darker near field, less
-        // washed-out gray haze over the playable highway. Restored when
-        // venue deactivates.
-        function _bgApplyVenueSceneFog(active) {
-            if (!scene || !scene.fog) return;
-            if (active) {
-                scene.fog.color.setHex(0x080c12);
-                scene.fog.near = FOG_START * 0.98;
-                scene.fog.far = FOG_END * 0.98;
-                // Keep the clear transparent while Butterchurn is active so the
-                // venue scene doesn't occlude the visualizer behind the highway.
-                if (ren) ren.setClearColor(0x080c12, _bcActive() ? 0 : 1);
-                if (ambLight) ambLight.intensity = 0.68;
-            } else {
-                // Restore the user's scene-color theme (clear + fog) rather than
-                // the old hardcoded gray, so deactivating venue doesn't wipe a
-                // chosen background theme. _applyBgTheme reads the current theme.
-                scene.fog.near = FOG_START * 0.8;
-                scene.fog.far = FOG_END * 1.2;
-                if (ambLight) ambLight.intensity = 0.85;
-                _applyBgTheme();
-            }
-        }
-
-        // Apply BOTH scene-color axes, each from its own setting key:
-        //   • BACKGROUND (bgThemeId): the WebGL clear color + the distance-fog
-        //     tint. Skipped while the venue scene is active (venue owns those —
-        //     see _bgApplyVenueSceneFog).
-        //   • HIGHWAY (hwThemeId): the fretboard/highway-surface plane + the lit
-        //     highway lane strip (the bright quad under the gems) + its dimmer
-        //     alternating row. Always themed; venue doesn't touch them.
-        // The two axes are independent, so picking a different id in each mixes
-        // freely. Safe to call any time; called from initScene, buildBoard, and
-        // the scene-theme listener (so a live switch of EITHER dropdown retints
-        // only its half immediately).
-        //
-        // The lane fields are OPTIONAL on a highway theme: one that omits `lane`
-        // / `laneDim` falls back to the stock lit/dim lane hexes, so every
-        // existing/neutral highway theme stays byte-identical (default blue lane
-        // unchanged). Only colored highway themes opt into a coordinated lane.
-        function _applyBgTheme() {
-            // --- Background axis: clear + fog ---
-            const bg = _bgBackgroundColors(bgThemeId);
-            if (!_venueSceneOverride) {
-                if (scene && scene.fog) scene.fog.color.setHex(bg.fog);
-                if (ren) ren.setClearColor(bg.clear, _bcActive() ? 0 : 1);
-            }
-            // --- Highway axis: board plane + lane ---
-            const hw = _bgHighwayColors(hwThemeId);
-            if (_boardPlaneMat) _boardPlaneMat.color.setHex(hw.board);
-            // Lit lane strip + its dimmer alternating row. Fall back to the
-            // hardcoded stock lane colors when the highway theme omits them.
-            const laneLit = (typeof hw.lane === 'number') ? hw.lane : HWY_LANE_STRIPE_ODD_HEX;
-            const laneDim = (typeof hw.laneDim === 'number') ? hw.laneDim : HWY_LANE_STRIPE_EVEN_HEX;
-            if (mLaneOdd) mLaneOdd.color.setHex(laneLit);
-            if (mLaneEven) mLaneEven.color.setHex(laneDim);
-            // Keep the (otherwise vestigial) lane target color in sync with the
-            // lit lane so any future lane-blend consumer reads the themed value.
-            if (_laneTargetColor) _laneTargetColor.setHex(laneLit);
-            else _laneTargetColor = new T.Color(laneLit);
-        }
+        /* ── h3d-carve-16: P-section (scene init) + buildBoard → src/scene-init.js ── */
 
         /* ── h3d-carve-8: Q-helpers (lighting/FX) → src/fx.js ─────────── */
         /* buildBoard deferred: see plans/highway3d-carve.md §3 row 16.  */
@@ -6239,336 +4235,290 @@ import { createRenderer } from './src/renderer.js'; // h3d-carve-15
             getRen: () => ren, getScene: () => scene, getCam: () => cam, getHighwayCanvas: () => highwayCanvas,
             canvasSize,
         });
-        function buildBoard() {
-            // Dispose before clearing (traverse: nut/headstock may live in a Group).
-            while (fretG.children.length) {
-                const child = fretG.children[0];
-                child.traverse((o) => {
-                    if (o instanceof T.Sprite) return;
-                    // fretTubeGeo is shared across all fret meshes — disposing it
-                    // per-mesh here would fire one redundant dispose event per
-                    // fret. Skip it; it's disposed exactly once below.
-                    if (o.geometry !== fretTubeGeo) o.geometry?.dispose?.();
-                    const mat = o.material;
-                    if (mat) {
-                        const mats = Array.isArray(mat) ? mat : [mat];
-                        for (const m of mats) m?.dispose?.();
-                    }
-                });
-                fretG.remove(child);
-            }
-            stringLines = [];
-            stringLineGlows = [];
-            // Fret wire materials were already disposed by the child.traverse()
-            // above (each is attached 1:1 to a fret mesh) — just clear the
-            // tracking array. The shared fretTubeGeo was skipped by that
-            // traverse, so dispose it exactly once here.
-            fretWireMats = [];
-            fretTubeGeo?.dispose?.();
-            fretTubeGeo = null;
-
-            const board = boardSpanX();
-            const bw = board.width + 4 * K;
-
-            // Fretboard plane — spans exactly from hit line (Z=0) to the note
-            // spawn horizon (-AHEAD * TS), so the far edge aligns with AHEAD.
-            const blAhead = TS * AHEAD;
-            const pg = new T.PlaneGeometry(bw, blAhead);
-            // Board (highway-surface) color comes from the active HIGHWAY scene
-            // theme (default theme = the original 0x08080e). Kept on
-            // _boardPlaneMat so _applyBgTheme can recolor it live without
-            // rebuilding the board.
-            const pm = new T.MeshLambertMaterial({ color: _bgHighwayColors(hwThemeId).board, transparent: true, opacity: 0.6 });
-            _boardPlaneMat = pm;
-            const p = new T.Mesh(pg, pm);
-            p.rotation.x = -Math.PI / 2;
-            p.position.set(board.center, S_BASE - NH / 2 - 2 * K, -blAhead / 2);
-            fretG.add(p);
-
-            // Thin Line strings (glow layer). Retained in stringLineGlows[]
-            // so vibrancy slider changes can mutate opacity in place
-            // without rebuilding the board geometry.
-            // Nut lateral layout (matches headstock block below): playing strings start at the
-            // fretboard-facing edge so they never project through nut/headstock.
-            const mir = _leftyCached ? -1 : 1;
-            const nutLenX = 1.55 * K;
-            const nutXC = -0.78 * K * mir;
-            const xHeadLeft = -6.85 * K * mir;
-            const nutRearX = nutXC - nutLenX * 0.5;
-            const nutFrontX = nutXC + nutLenX * 0.5;
-            const nutJoinX = nutFrontX + 0.03 * K;
-            const bridgeTipX = xFret(NFRETS) + 2 * K * mir;
-            boardStringStartX = Math.min(nutJoinX, bridgeTipX);
-            boardTuningLabelX = (nutRearX + xHeadLeft) * 0.5 - 0.15 * K * mir;
-            const stringEndX = Math.max(nutJoinX, bridgeTipX);
-            const strSpan = Math.max(stringEndX - boardStringStartX, 1.5 * K);
-
-            const lineGlowOp = 0.15 + 0.35 * vibrancy;
-            for (let s = 0; s < nStr; s++) {
-                const pts = [new T.Vector3(boardStringStartX, sY(s), 0), new T.Vector3(stringEndX, sY(s), 0)];
-                const g = new T.BufferGeometry().setFromPoints(pts);
-                const line = new T.Line(g, new T.LineBasicMaterial({ color: activePalette[s], transparent: true, opacity: lineGlowOp }));
-                line.renderOrder = 7; // above sus rails (4/5), below chord fill (10)
-                fretG.add(line);
-                stringLineGlows.push(line);
-            }
-
-            // BoxGeometry strings — emissive glow driven by updateStringHighlights()
-            for (let s = 0; s < nStr; s++) {
-                const g = new T.BoxGeometry(strSpan, STR_THICK, STR_THICK);
-                // Each string gets its own material instance so emissiveIntensity is per-string
-                // (and per-frame opacity is set by updateStringHighlights via _vibrancyIdleOp)
-                const mat = new T.MeshStandardMaterial({
-                    color: activePalette[s], emissive: activePalette[s],
-                    emissiveIntensity: 0.002,
-                    transparent: true, opacity: _vibrancyIdleOp, roughness: 1,
-                });
-                const mesh = new T.Mesh(g, mat);
-                mesh.renderOrder = renderOrderForLayerAtZ(0, 'BOARD_STRING');
-                mesh.position.set(boardStringStartX + strSpan * 0.5, sY(s), 0);
-                fretG.add(mesh);
-                stringLines.push(mesh);
-            }
-
-            // Guitar nut + headstock — grouped so visibility + colors are user-tunable.
-            {
-                nutHeadstockGroup = new T.Group();
-                const yTopN = Math.max(sY(0), sY(nStr - 1));
-                const yBottomN = Math.min(sY(0), sY(nStr - 1));
-                const yMidN = (yTopN + yBottomN) / 2;
-                const spanY = Math.abs(yTopN - yBottomN) + S_GAP * 1.05;
-
-                const nutD = 0.95 * K;
-                const nutZc = -0.62 * K;
-                const nutH = spanY * 1.06;
-                const nutHalfH = nutH * 0.5;
-
-                const zBack = -1.38 * K;
-                const zJoint = -0.58 * K;
-
-                const nutInt = _h3dHexOrDefault(nutColor, BG_DEFAULTS.nutColor);
-                const hsInt = _h3dHexOrDefault(headstockColor, BG_DEFAULTS.headstockColor);
-                const nutBase = new T.Color(nutInt);
-                const nutHi = nutBase.clone().lerp(new T.Color(0xffffff), 0.14);
-                const nutGro = nutBase.clone().multiplyScalar(0.72);
-                const hsBase = new T.Color(hsInt);
-                const hsDarkC = hsBase.clone().multiplyScalar(0.76);
-
-                const mapleMat = new T.MeshStandardMaterial({
-                    color: hsBase, roughness: 0.55, metalness: 0.02,
-                });
-                const mapleDark = new T.MeshStandardMaterial({
-                    color: hsDarkC, roughness: 0.62, metalness: 0.02,
-                });
-
-                const coreLen = Math.max(Math.abs(nutRearX - xHeadLeft), 2 * K);
-                const coreCX = (nutRearX + xHeadLeft) * 0.5;
-                const headCoreD = 1.05 * K;
-                const headCore = new T.Mesh(
-                    new T.BoxGeometry(coreLen, spanY * 1.12, headCoreD),
-                    mapleDark,
-                );
-                headCore.position.set(coreCX, yMidN, zBack - headCoreD * 0.35);
-                nutHeadstockGroup.add(headCore);
-
-                const xs = 14;
-                const ys = 12;
-                const yLo = yMidN - spanY * 0.58;
-                const yHi = yMidN + spanY * 0.58;
-                const posR = new Float32Array((xs + 1) * (ys + 1) * 3);
-                const idxR = [];
-                let ri = 0;
-                for (let j = 0; j <= ys; j++) {
-                    const v = j / ys;
-                    const wy = yLo + v * (yHi - yLo);
-                    const yArc = 1 - Math.abs((wy - yMidN) / (spanY * 0.55 + 1e-6));
-                    const yArcCl = Math.max(0, Math.min(1, yArc));
-                    for (let i = 0; i <= xs; i++) {
-                        const u = i / xs;
-                        const wx = xHeadLeft + u * (nutRearX - xHeadLeft);
-                        const smooth = Math.sin(u * Math.PI * 0.5);
-                        let wz = zBack + (zJoint - zBack) * smooth;
-                        wz += 0.14 * K * yArcCl * yArcCl;
-                        posR[ri++] = wx;
-                        posR[ri++] = wy;
-                        posR[ri++] = wz;
-                    }
-                }
-                const row = xs + 1;
-                for (let j = 0; j < ys; j++) {
-                    for (let i = 0; i < xs; i++) {
-                        const a = j * row + i;
-                        const b = a + row;
-                        idxR.push(a, b, a + 1, b, b + 1, a + 1);
-                    }
-                }
-                const rampGeo = new T.BufferGeometry();
-                rampGeo.setAttribute('position', new T.BufferAttribute(posR, 3));
-                rampGeo.setIndex(idxR);
-                rampGeo.computeVertexNormals();
-                nutHeadstockGroup.add(new T.Mesh(rampGeo, mapleMat));
-
-                const boneMat = new T.MeshStandardMaterial({
-                    color: nutBase, roughness: 0.38, metalness: 0.02,
-                });
-                const boneTop = new T.MeshStandardMaterial({
-                    color: nutHi, roughness: 0.32, metalness: 0.02,
-                });
-                const grooveMat = new T.MeshStandardMaterial({
-                    color: nutGro, roughness: 0.85, metalness: 0,
-                });
-
-                const nutBody = new T.Mesh(
-                    new T.BoxGeometry(nutLenX, nutH, nutD),
-                    boneMat,
-                );
-                nutBody.position.set(nutXC, yMidN, nutZc);
-                nutHeadstockGroup.add(nutBody);
-
-                const crownR = nutLenX * 0.52;
-                const crownSeg = new T.CylinderGeometry(
-                    crownR, crownR, nutLenX * 0.92, 20, 1, true,
-                    Math.PI * 0.08, Math.PI * 0.42,
-                );
-                const crown = new T.Mesh(crownSeg, boneTop);
-                crown.rotation.z = Math.PI * 0.5;
-                crown.position.set(
-                    nutXC,
-                    yMidN + nutHalfH - 0.02 * K,
-                    nutZc + nutD * 0.22,
-                );
-                nutHeadstockGroup.add(crown);
-
-                const slotDrop = 0.11 * K;
-                const slotHalfW = STR_THICK * 1.15;
-                const slotZ = nutZc + nutD * 0.12;
-                for (let st = 0; st < nStr; st++) {
-                    const gr = new T.Mesh(
-                        new T.BoxGeometry(slotHalfW * 2, slotDrop, nutD * 0.42),
-                        grooveMat,
-                    );
-                    gr.position.set(nutXC, sY(st), slotZ);
-                    nutHeadstockGroup.add(gr);
-                }
-                nutHeadstockGroup.visible = nutHeadstockVisible;
-                fretG.add(nutHeadstockGroup);
-            }
-
-            // Fret wires — bowed metal TubeGeometry (backported from
-            // highway_babylon). Board-string and fret-wire layers live in
-            // RENDER_ORDER_LAYER_STACK so the fretboard draws above note
-            // symbols and below fret labels.
-            // Tube (not T.Line): WebGL ignores linewidth > 1px on almost all
-            // platforms, so Line objects always render as hairlines. The tube
-            // bows in Z (middle strings pushed away from camera) so the row of
-            // frets reads as wrapping a cylindrical neck — see FRET_BOW_DZ.
-            // MeshStandardMaterial (vs the old flat MeshBasic): the scene's
-            // ambient+directional light glints across the rounded surface for a
-            // polished-steel look; the per-frame gold albedo (in-anchor) then
-            // reads as brass. depthTest:false: string BoxGeometry (MeshStandard,
-            // depthWrite:true) writes depth at Z=+STR_THICK/2; wires near Z=0
-            // would fail the depth test at string pixels despite higher layer.
-            // Colors are updated each frame by the fretWireMats loop in update(),
-            // which drives every wire to one of two tiers: FRET_WIRE_IDLE_* by
-            // default, FRET_WIRE_ACTIVE_* inside the anchor lane. The material is
-            // created at the idle tier so frame 0 (before update() first runs)
-            // already matches.
-            const yTop = Math.max(sY(0), sY(nStr - 1));
-            const yBottom = Math.min(sY(0), sY(nStr - 1));
-            const wireH = (yTop + S_GAP * 0.3) - (yBottom - S_GAP * 0.3);
-            const wireMidY = (yTop + yBottom) / 2;
-            // Single shared geometry centered at x=0, local Y -half..+half,
-            // bowed in Z by FRET_BOW_DZ * [0,0.6,1,0.6,0]. Reused by every fret
-            // (only mesh position differs). Symmetric in Y → invert/lefty-safe.
-            const yHalf = wireH * 0.5;
-            const zMults = [0, 0.6, 1, 0.6, 0];
-            const tubePath = zMults.map((zm, i) => new T.Vector3(
-                0,
-                -yHalf + (wireH * i) / (zMults.length - 1),
-                FRET_BOW_DZ * zm,
-            ));
-            const tubeCurve = new T.CatmullRomCurve3(tubePath);
-            fretTubeGeo = new T.TubeGeometry(
-                tubeCurve, FRET_TUBE_SEG, FRET_TUBE_RADIUS, FRET_TUBE_RADIAL, false,
-            );
-            for (let f = 0; f <= NFRETS; f++) {
-                const x = xFret(f);
-                const mat = new T.MeshStandardMaterial({
-                    color: FRET_WIRE_IDLE_HEX, metalness: FRET_METALNESS, roughness: FRET_ROUGHNESS,
-                    emissive: FRET_EMISSIVE,
-                    // depthWrite:false (matches other transparent overlays here):
-                    // a transparent fret must not write depth or it can occlude
-                    // later-drawn transparent elements despite depthTest:false.
-                    transparent: true, opacity: FRET_WIRE_IDLE_OP, depthTest: false, depthWrite: false,
-                });
-                const fw = new T.Mesh(fretTubeGeo, mat);
-                fw.position.set(x, wireMidY, 0);
-                fw.renderOrder = renderOrderForLayerAtZ(0, 'BOARD_FRET_WIRE');
-                fretG.add(fw);
-                fretWireMats[f] = mat;
-            }
-
-            // Fret dots — flat circles (CircleGeometry) lying in the XY plane and
-            // facing +Z so they always appear as perfect circles from the camera.
-            // depthWrite:false so they don't steal the depth buffer from the
-            // transparent string meshes. Slight negative Z recessed under the
-            // string plane. Radius 10% below the former 1.5*K dots.
-            const dotRZ = (1.5 * K * 0.9);
-            const dg = new T.CircleGeometry(dotRZ, 64);
-            const dm = new T.MeshBasicMaterial({
-                color: 0x556677,
-                transparent: true,
-                opacity: 1,
-                depthWrite: false,
-            });
-            const dotZBack = -STR_THICK * 0.85;
-            const my = (sY(0) + sY(nStr - 1)) / 2;
-            const addDot = (x, y) => {
-                const d = new T.Mesh(dg, dm);
-                d.position.set(x, y, dotZBack);
-                // Above the dynamic lane (1) and its dividers (2) so the
-                // translucent blue lane no longer paints over and hides the
-                // inlay; still well below strings / wires / notes,
-                // so those keep drawing on top of the inlay.
-                d.renderOrder = 3;
-                fretG.add(d);
-            };
-            for (const f of DOTS) {
-                const cx = xFretMid(f);
-                if (DDOTS.has(f)) {
-                    addDot(cx, my - S_GAP * 0.7);
-                    addDot(cx, my + S_GAP * 0.7);
-                } else {
-                    addDot(cx, my);
-                }
-            }
-
-            // Fret inlay number labels — sprites sitting just behind the hit line
-            // (Z = -K) so camera-distance sorting in the transparent pass puts
-            // them before notes at Z = 0, letting notes paint on top.
-            // Materials are cloned from the txtMat cache with depthWrite:false so
-            // the sprites don't write stale depth values that would clip incoming
-            // notes (which arrive from large negative Z). Clones are tracked in
-            // _inlayMats for explicit disposal on rebuild and destroy().
-            // Scale uses (0.5 + textSize) directly — _textSizeMul is stale here
-            // (only refreshed at the top of update()); update() rescales live.
-            for (const m of _inlayMats) m.dispose();
-            _inlayMats = [];
-            _inlayLabels = [];
-            for (const f of INLAY_LABEL_FRETS) {
-                const mat = txtMat(f, '#7abfcc', false, 'fretRow').clone();
-                mat.depthWrite = false;
-                mat.opacity = 0.55;
-                const lbl = new T.Sprite(mat);
-                const scale = 5.5 * (0.5 + textSize) * fretLabelScaleForFret(f);
-                lbl.scale.set(scale * K, scale * K, 1);
-                lbl.position.set(xFretMid(f), yTop - S_GAP * 0.4, -K);
-                lbl.visible = inlayLabelsVisible;
-                fretG.add(lbl);
-                _inlayLabels.push(lbl);
-                _inlayMats.push(mat);
-            }
-        }
+        /* ── h3d-carve-16: P-section (scene init) + buildBoard → src/scene-init.js ── */
+        const {
+            initScene, buildBoard, _bgUnmountStyle, _bcSyncMode,
+        } = createSceneInit({
+            // ── Module constants ─────────────────────────────────────────────
+            K, NW, NH, ND, NFRETS,
+            S_BASE, S_GAP,
+            FOG_START, FOG_END, BASE_VFOV,
+            HWY_LANE_STRIPE_ODD_HEX, HWY_LANE_STRIPE_EVEN_HEX,
+            CHORD_BOX_TEAL_HEX, CHORD_BOX_TEAL_DARK_HEX, CHORD_BOX_FILL_GRAD_ALPHA,
+            ARPEGGIO_BOX_BLUE_HEX, ARPEGGIO_BOX_BLUE_DARK_HEX, ARPEGGIO_RIM_BLUE_HEX,
+            FRET_LABEL_GOLD_HEX, CHORD_BOX_EDGE_ALPHA,
+            BG_DEFAULTS, BG_STYLES, PALETTES,
+            IM_TECH_CAP, IM_STRUM_CAP, MAX_RENDER_STRINGS,
+            SLIDE_RIBBON_SAMPLES, SLIDE_RIBBON_INDICES_ARR,
+            DEFAULT_GEM_GRADIENTS, INLAY_LABEL_FRETS,
+            SPARK_N: _SPARK_N,
+            _ND_TTL_MS, _ND_TIME_EPS,
+            FRET_WIRE_HIT_HEX, FRET_WIRE_HIT_EMISSIVE, FRET_WIRE_IDLE_HEX, FRET_WIRE_IDLE_OP,
+            FRET_WIRE_HIT_OP, FRET_WIRE_HIT_INTENSITY, FRET_WIRE_HIT_DECAY,
+            ACCENT_RIM_BASE_EMISSIVE,
+            ACCENT_HALO_OP_NEAR, ACCENT_HALO_OP_MID, ACCENT_HALO_OP_FAR,
+            ACCENT_HALO_XY_INNER, ACCENT_HALO_XY_MID, ACCENT_HALO_XY_OUTER,
+            ACCENT_HALO_Z_INNER, ACCENT_HALO_Z_MID, ACCENT_HALO_Z_OUTER,
+            STR_THICK, FRET_BOW_DZ, FRET_TUBE_RADIUS, FRET_TUBE_SEG, FRET_TUBE_RADIAL,
+            FRET_METALNESS, FRET_ROUGHNESS, FRET_EMISSIVE,
+            AHEAD, TS, DOTS, DDOTS,
+            // ── Stable fn/obj refs ───────────────────────────────────────────
+            sY,
+            fretLabelScaleForFret,
+            pool,
+            txtMat,
+            palmMuteXSpriteMat, fretHandMuteXSpriteMat,
+            _applyCinematic,
+            _h3dHexOrDefault,
+            _bgPanelKey, _bgReadSetting, _bgGetAnalyser,
+            _bgBackgroundColors, _bgHighwayColors,
+            _bgSubscribe, _bgHasStored, _bgMemFallback,
+            _venueSwapPlateIfNeeded,
+            _darkenInt, _lightenInt, _h3dHexToInt,
+            boardSpanX,
+            _bcCreateController,
+            updateStringHighlights: null,
+            canvasSize, applySize,
+            fxInit,
+            _disposeOpenStringPitchSprites,
+            _ownedSharedMats, _ownedSharedGeos,
+            _imPMTechAlphaArr, _imFHTechAlphaArr,
+            _imPMXFillAlphaArr, _imPMXLinesAlphaArr,
+            _imFHXFillAlphaArr, _imFHXLinesAlphaArr,
+            fretLastActiveTime,
+            _fwHitGlow,
+            _customPalette,
+            _outlinePalette: null,
+            _tuningLabelSprites,
+            // ── Read-only getters ────────────────────────────────────────────
+            getH3dFretUniform: () => _h3dFretUniform,
+            getHighwayCanvas: () => highwayCanvas,
+            getInstanceId: () => _instanceId,
+            getLeftyCached: () => _leftyCached,
+            getNStr: () => nStr,
+            getActivePalette: () => activePalette,
+            getTextSize: () => textSize,
+            getGlowMul: () => glowMul,
+            getVibrancyIdleOp: () => _vibrancyIdleOp,
+            getVibrancyProjOp: () => _vibrancyProjOp,
+            getBgReactiveOptOut: () => _bgReactiveOptOut,
+            getVenueSceneOverride: () => _venueSceneOverride,
+            getIsDestroyed: () => _destroyed,
+            getVibrancy: () => vibrancy,
+            // ── Getter+setter pairs ──────────────────────────────────────────
+            getWrap: () => wrap, setWrap: (v) => { wrap = v; },
+            getRen: () => ren, setRen: (v) => { ren = v; },
+            getScene: () => scene, setScene: (v) => { scene = v; },
+            getCam: () => cam, setCam: (v) => { cam = v; },
+            getAmbLight: () => ambLight, setAmbLight: (v) => { ambLight = v; },
+            getDirLight: () => dirLight, setDirLight: (v) => { dirLight = v; },
+            getFretG: () => fretG, setFretG: (v) => { fretG = v; },
+            getTuningLblG: () => tuningLblG, setTuningLblG: (v) => { tuningLblG = v; },
+            getNoteG: () => noteG, setNoteG: (v) => { noteG = v; },
+            getBeatG: () => beatG, setBeatG: (v) => { beatG = v; },
+            getLblG: () => lblG, setLblG: (v) => { lblG = v; },
+            getLyricsCanvas: () => lyricsCanvas, setLyricsCanvas: (v) => { lyricsCanvas = v; },
+            setLyricsCtx: (v) => { lyricsCtx = v; },
+            setHighwayCanvas: (v) => { highwayCanvas = v; },
+            getVisibilityHandler: () => _visibilityHandler, setVisibilityHandler: (v) => { _visibilityHandler = v; },
+            getCanvasReplacedHandler: () => _canvasReplacedHandler, setCanvasReplacedHandler: (v) => { _canvasReplacedHandler = v; },
+            getOnCtxLost: () => _onCtxLost, setOnCtxLost: (v) => { _onCtxLost = v; },
+            getOnCtxRestored: () => _onCtxRestored, setOnCtxRestored: (v) => { _onCtxRestored = v; },
+            setCtxLost: (v) => { _ctxLost = v; },
+            getBgGroup: () => bgGroup, setBgGroup: (v) => { bgGroup = v; },
+            getBgListener: () => _bgListener, setBgListener: (v) => { _bgListener = v; },
+            setProbe: (v) => { _probe = v; },
+            getBgStyleId: () => bgStyleId, setBgStyleId: (v) => { bgStyleId = v; },
+            getBgIntensity: () => bgIntensity, setBgIntensity: (v) => { bgIntensity = v; },
+            getBgThemeId: () => bgThemeId, setBgThemeId: (v) => { bgThemeId = v; },
+            getHwThemeId: () => hwThemeId, setHwThemeId: (v) => { hwThemeId = v; },
+            getBgPaletteSig: () => _bgPaletteSig, setBgPaletteSig: (v) => { _bgPaletteSig = v; },
+            setBgReactive: (v) => { bgReactive = v; },
+            getLaneTargetColor: () => _laneTargetColor, setLaneTargetColor: (v) => { _laneTargetColor = v; },
+            getBoardPlaneMat: () => _boardPlaneMat, setBoardPlaneMat: (v) => { _boardPlaneMat = v; },
+            getHeadstockColor: () => headstockColor, setHeadstockColor: (v) => { headstockColor = v; },
+            getNutColor: () => nutColor, setNutColor: (v) => { nutColor = v; },
+            getNutHeadstockGroup: () => nutHeadstockGroup, setNutHeadstockGroup: (v) => { nutHeadstockGroup = v; },
+            getNutHeadstockVisible: () => nutHeadstockVisible, setNutHeadstockVisible: (v) => { nutHeadstockVisible = v; },
+            getInlayLabels: () => _inlayLabels, setInlayLabels: (v) => { _inlayLabels = v; },
+            getInlayMats: () => _inlayMats, setInlayMats: (v) => { _inlayMats = v; },
+            getInlayLabelsVisible: () => inlayLabelsVisible, setInlayLabelsVisible: (v) => { inlayLabelsVisible = v; },
+            getStringLineGlows: () => stringLineGlows, setStringLineGlows: (v) => { stringLineGlows = v; },
+            getStringLines: () => stringLines, setStringLines: (v) => { stringLines = v; },
+            getProjMeshArr: () => projMeshArr, setProjMeshArr: (v) => { projMeshArr = v; },
+            getBcCtrl: () => bcCtrl, setBcCtrl: (v) => { bcCtrl = v; },
+            setChartEnv: (v) => { _chartEnv = v; },
+            setChartPrevT: (v) => { _chartPrevT = v; },
+            setBcBeatIdx: (v) => { _bcBeatIdx = v; },
+            setBcNoteIdx: (v) => { _bcNoteIdx = v; },
+            setBcChordIdx: (v) => { _bcChordIdx = v; },
+            getSparkPos: () => _sparkPos, setSparkPos: (v) => { _sparkPos = v; },
+            getSparkCol: () => _sparkCol, setSparkCol: (v) => { _sparkCol = v; },
+            setSparkVel: (v) => { _sparkVel = v; },
+            setSparkLife: (v) => { _sparkLife = v; },
+            setSparkPts: (v) => { _sparkPts = v; },
+            getSparkPts: () => _sparkPts,
+            getMStr: () => mStr, setMStr: (v) => { mStr = v; },
+            getMGlow: () => mGlow, setMGlow: (v) => { mGlow = v; },
+            getMSus: () => mSus, setMSus: (v) => { mSus = v; },
+            getMBarre: () => mBarre, setMBarre: (v) => { mBarre = v; },
+            getMStrHitOutline: () => mStrHitOutline, setMStrHitOutline: (v) => { mStrHitOutline = v; },
+            getMAccentOutline: () => mAccentOutline, setMAccentOutline: (v) => { mAccentOutline = v; },
+            getMAccentCore: () => mAccentCore, setMAccentCore: (v) => { mAccentCore = v; },
+            getMAccentHaloNear: () => mAccentHaloNear, setMAccentHaloNear: (v) => { mAccentHaloNear = v; },
+            getMAccentHaloMid: () => mAccentHaloMid, setMAccentHaloMid: (v) => { mAccentHaloMid = v; },
+            getMAccentHaloFar: () => mAccentHaloFar, setMAccentHaloFar: (v) => { mAccentHaloFar = v; },
+            getMHitSusOutline: () => mHitSusOutline, setMHitSusOutline: (v) => { mHitSusOutline = v; },
+            setMMissEdgeArrays: (v) => { mMissEdgeArrays = v; },
+            setMEdgeTransparent: (v) => { mEdgeTransparent = v; },
+            getMHitBright: () => mHitBright, setMHitBright: (v) => { mHitBright = v; },
+            setMHitBrightArrays: (v) => { mHitBrightArrays = v; },
+            getMRimFlash: () => mRimFlash, setMRimFlash: (v) => { mRimFlash = v; },
+            getMWhiteOutline: () => mWhiteOutline, setMWhiteOutline: (v) => { mWhiteOutline = v; },
+            getMSusOutline: () => mSusOutline, setMSusOutline: (v) => { mSusOutline = v; },
+            getMMissOutline: () => mMissOutline, setMMissOutline: (v) => { mMissOutline = v; },
+            getMTapChevron: () => mTapChevron, setMTapChevron: (v) => { mTapChevron = v; },
+            setMLaneDivider: (v) => { mLaneDivider = v; },
+            setMLaneDividerArp: (v) => { mLaneDividerArp = v; },
+            setMLaneDividerExt: (v) => { mLaneDividerExt = v; },
+            getMLaneOdd: () => mLaneOdd, setMLaneOdd: (v) => { mLaneOdd = v; },
+            getMLaneEven: () => mLaneEven, setMLaneEven: (v) => { mLaneEven = v; },
+            setMBeatM: (v) => { mBeatM = v; },
+            setMBeatQ: (v) => { mBeatQ = v; },
+            setMSusRailBase: (v) => { mSusRailBase = v; },
+            setMSusRailBloomBase: (v) => { mSusRailBloomBase = v; },
+            setAccentShellsByString: (v) => { _accentShellsByString = v; },
+            getPaletteColorTmp: () => _paletteColorTmp, setPaletteColorTmp: (v) => { _paletteColorTmp = v; },
+            getGNoteGrad: () => gNoteGrad, setGNoteGrad: (v) => { gNoteGrad = v; },
+            getGArpBracket: () => gArpBracket, setGArpBracket: (v) => { gArpBracket = v; },
+            getGHaloBar: () => gHaloBar, setGHaloBar: (v) => { gHaloBar = v; },
+            getGPMXLines: () => gPMXLines, setGPMXLines: (v) => { gPMXLines = v; },
+            getGFHXLines: () => gFHXLines, setGFHXLines: (v) => { gFHXLines = v; },
+            getGPMXFill: () => gPMXFill, setGPMXFill: (v) => { gPMXFill = v; },
+            getGFHXFill: () => gFHXFill, setGFHXFill: (v) => { gFHXFill = v; },
+            setGNote: (v) => { gNote = v; },
+            setGSus: (v) => { gSus = v; },
+            setGBeat: (v) => { gBeat = v; },
+            setGTapChevron: (v) => { gTapChevron = v; },
+            setGLanePlane: (v) => { gLanePlane = v; },
+            setGSusRail: (v) => { gSusRail = v; },
+            setGSusRailBloom: (v) => { gSusRailBloom = v; },
+            setGTechPlane: (v) => { gTechPlane = v; },
+            setGGhostFretPlane: (v) => { gGhostFretPlane = v; },
+            setChordFrameGradTex: (v) => { chordFrameGradTex = v; },
+            setChordFrameGradTexArp: (v) => { chordFrameGradTexArp = v; },
+            getFretTubeGeo: () => fretTubeGeo, setFretTubeGeo: (v) => { fretTubeGeo = v; },
+            setFretWireMats: (v) => { fretWireMats = v; },
+            setPNote: (v) => { pNote = v; },
+            setPNoteEdge: (v) => { pNoteEdge = v; },
+            setPAccentHalo: (v) => { pAccentHalo = v; },
+            setPSus: (v) => { pSus = v; },
+            setPSusOutline: (v) => { pSusOutline = v; },
+            setPSusRibbon: (v) => { pSusRibbon = v; },
+            setPSusRibbonOl: (v) => { pSusRibbonOl = v; },
+            setPLbl: (v) => { pLbl = v; },
+            setPBeat: (v) => { pBeat = v; },
+            setPSec: (v) => { pSec = v; },
+            setPFretLbl: (v) => { pFretLbl = v; },
+            setPLane: (v) => { pLane = v; },
+            setPLaneDivider: (v) => { pLaneDivider = v; },
+            setPGhostFretLbl: (v) => { pGhostFretLbl = v; },
+            setPChordBox: (v) => { pChordBox = v; },
+            setPChordFrameFill: (v) => { pChordFrameFill = v; },
+            setPChordLbl: (v) => { pChordLbl = v; },
+            setPBarreLine: (v) => { pBarreLine = v; },
+            setPArpBracket: (v) => { pArpBracket = v; },
+            setPNoteFretLabel: (v) => { pNoteFretLabel = v; },
+            setPTeachMarkLbl: (v) => { pTeachMarkLbl = v; },
+            setPConnectorLine: (v) => { pConnectorLine = v; },
+            setPDropLine: (v) => { pDropLine = v; },
+            setPFretColMarker: (v) => { pFretColMarker = v; },
+            setPTapChevron: (v) => { pTapChevron = v; },
+            setPHaloBar: (v) => { pHaloBar = v; },
+            setPSusRail: (v) => { pSusRail = v; },
+            setPSusRailBloom: (v) => { pSusRailBloom = v; },
+            setPTechPlane: (v) => { pTechPlane = v; },
+            setPPMXFill: (v) => { pPMXFill = v; },
+            setPFHXFill: (v) => { pFHXFill = v; },
+            setPMuteXLines: (v) => { pMuteXLines = v; },
+            setPFHXLines: (v) => { pFHXLines = v; },
+            setImPMTech: (v) => { imPMTech = v; },
+            setImFHTech: (v) => { imFHTech = v; },
+            setImGPMTech: (v) => { _imGPMTech = v; },
+            setImGFHTech: (v) => { _imGFHTech = v; },
+            setImPMTechMat: (v) => { _imPMTechMat = v; },
+            setImFHTechMat: (v) => { _imFHTechMat = v; },
+            setImPMXFill: (v) => { imPMXFill = v; },
+            setImPMXLines: (v) => { imPMXLines = v; },
+            setImFHXFill: (v) => { imFHXFill = v; },
+            setImFHXLines: (v) => { imFHXLines = v; },
+            setImPMXFillMat: (v) => { _imPMXFillMat = v; },
+            setImPMXLinesMat: (v) => { _imPMXLinesMat = v; },
+            setImFHXFillMat: (v) => { _imFHXFillMat = v; },
+            setImFHXLinesMat: (v) => { _imFHXLinesMat = v; },
+            setImM4: (v) => { _imM4 = v; },
+            setImPos: (v) => { _imPos = v; },
+            setImSca: (v) => { _imSca = v; },
+            setImQ: (v) => { _imQ = v; },
+            setImAZ: (v) => { _imAZ = v; },
+            setImColor: (v) => { _imColor = v; },
+            setFwHitColor: (v) => { _fwHitColor = v; },
+            setFwHitEmissive: (v) => { _fwHitEmissive = v; },
+            setFwHitPrevTime: (v) => { _fwHitPrevTime = v; },
+            setSparks: (v) => { _sparks = v; },
+            setHitFx: (v) => { _hitFx = v; },
+            setCinematic: (v) => { _cinematic = v; },
+            setVerdictMarks: (v) => { _verdictMarks = v; },
+            setTimingFx: (v) => { _timingFx = v; },
+            setStreakFx: (v) => { _streakFx = v; },
+            setBloom: (v) => { _bloom = v; },
+            setBloomGaussTex: (v) => { _bloomGaussTex = v; },
+            setActivePalette: (v) => { activePalette = v; },
+            setCameraSmoothing: (v) => { cameraSmoothing = v; },
+            setZoomSmoothing: (v) => { zoomSmoothing = v; },
+            setTiltSmoothing: (v) => { tiltSmoothing = v; },
+            setCameraLockLow: (v) => { cameraLockLow = v; },
+            setCameraLockZoom: (v) => { cameraLockZoom = v; },
+            setCameraMode: (v) => { cameraMode = v; },
+            setTextSize: (v) => { textSize = v; },
+            setVibrancy: (v) => { vibrancy = v; },
+            setGlowMul: (v) => { glowMul = v; },
+            setFpsVisible: (v) => { fpsVisible = v; },
+            setVibrancyIdleOp: (v) => { _vibrancyIdleOp = v; },
+            setVibrancyProjOp: (v) => { _vibrancyProjOp = v; },
+            setShowFretOnNote: (v) => { showFretOnNote = v; },
+            setFretNumberGhostScope: (v) => { fretNumberGhostScope = v; },
+            setFretColumnMarkerCadence: (v) => { fretColumnMarkerCadence = v; },
+            setSectionLabelsOnHighway: (v) => { sectionLabelsOnHighway = v; },
+            setSectionHudVisible: (v) => { sectionHudVisible = v; },
+            setSectionHudPosition: (v) => { sectionHudPosition = v; },
+            setSectionHudSize: (v) => { sectionHudSize = v; },
+            setToneHudVisible: (v) => { toneHudVisible = v; },
+            setToneHudPosition: (v) => { toneHudPosition = v; },
+            setToneHudSize: (v) => { toneHudSize = v; },
+            setChordDiagramVisible: (v) => { chordDiagramVisible = v; },
+            setChordDiagramPosition: (v) => { chordDiagramPosition = v; },
+            setChordDiagramSize: (v) => { chordDiagramSize = v; },
+            setFretDividersVisible: (v) => { fretDividersVisible = v; },
+            setTuningLabelsVisible: (v) => { tuningLabelsVisible = v; },
+            setProjectionVisible: (v) => { projectionVisible = v; },
+            setSlideArrowApproachVisible: (v) => { slideArrowApproachVisible = v; },
+            setSlideArrowNeckVisible: (v) => { slideArrowNeckVisible = v; },
+            setSlideArrowChainPreviewVisible: (v) => { slideArrowChainPreviewVisible = v; },
+            setTintR: (v) => { _tintR = v; },
+            setTintG: (v) => { _tintG = v; },
+            setTintB: (v) => { _tintB = v; },
+            setBoardStringStartX: (v) => { boardStringStartX = v; },
+            setBoardTuningLabelX: (v) => { boardTuningLabelX = v; },
+            getNdOnHit: () => _ndOnHit, setNdOnHit: (v) => { _ndOnHit = v; },
+            getNdOnMiss: () => _ndOnMiss, setNdOnMiss: (v) => { _ndOnMiss = v; },
+            getNdOnBusHit: () => _ndOnBusHit, setNdOnBusHit: (v) => { _ndOnBusHit = v; },
+            getNdOnBusMiss: () => _ndOnBusMiss, setNdOnBusMiss: (v) => { _ndOnBusMiss = v; },
+            getNdHitMarks: () => _ndHitMarks, setNdHitMarks: (v) => { _ndHitMarks = v; },
+            getNdMissMarks: () => _ndMissMarks, setNdMissMarks: (v) => { _ndMissMarks = v; },
+            setBgLastT: (v) => { _bgLastT = v; },
+            setLastOpenStringLblSig: (v) => { _lastOpenStringLblSig = v; },
+        });
 
         /* ── String glow (called each frame) ────────────────────────────── */
         /* ── h3d-carve-11: R-section (string glow) → src/string-glow.js ── */

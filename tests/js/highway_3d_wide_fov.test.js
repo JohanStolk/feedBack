@@ -22,7 +22,8 @@ const path = require('node:path');
 
 const SCREEN_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'screen.js');
 const CAMERA_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'camera.js'); // h3d-carve-9
-const src = fs.readFileSync(SCREEN_JS, 'utf8');
+const SCENE_INIT_JS = path.join(__dirname, '..', '..', 'plugins', 'highway_3d', 'src', 'scene-init.js'); // h3d-carve-16
+const src = fs.readFileSync(SCREEN_JS, 'utf8') + '\n' + fs.readFileSync(SCENE_INIT_JS, 'utf8');
 const cameraSrc = fs.readFileSync(CAMERA_JS, 'utf8'); // h3d-carve-9: effectiveVfov/camUpdate moved here
 
 // ── Constants ────────────────────────────────────────────────────────────────
