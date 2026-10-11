@@ -1500,7 +1500,11 @@
 
     /** Fret-number label tints — gold on approaching/active notes, muted blue when idle. */
     const FRET_LABEL_GOLD_HEX = '#D8A636';
-    const NOTE_NAME_HEX = '#ffffff';  // on-note name labels (noteNamesVisible)
+    // On-note name labels (noteNamesVisible). Light grey, not white: the bloom
+    // pass (UnrealBloomPass threshold 0.82) makes anything brighter glow, which
+    // turned white names hazy once bloom loaded. #c6c6c6 sits at ~0.78, like the
+    // gold fret numbers (~0.66) that stay crisp.
+    const NOTE_NAME_HEX = '#c6c6c6';
     const FRET_LABEL_IDLE_HEX = '#9ab8cc';
 
     /** 3D chord-box rim bars (thin on all chords, including repeats in a sequence). */

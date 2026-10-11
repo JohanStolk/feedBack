@@ -141,6 +141,17 @@ test('long-notes-only and string filters gate the label', () => {
     assert.match(src, /\+ '\|' \+ noteNamesStrings;/);
 });
 
+test('note names stay below the bloom threshold so they render crisp, not hazy', () => {
+    // Text textures are raw (NoColorSpace) canvas colours, so the bloom high-pass
+    // sees the label colour directly. White (1.0) bloomed; keep it under the threshold.
+    const hex = src.match(/const NOTE_NAME_HEX = '#([0-9a-fA-F]{6})'/);
+    const bloom = src.match(/new UB\.UnrealBloomPass\(new T\.Vector2\([^)]*\), [\d.]+, [\d.]+, ([\d.]+)\)/);
+    assert.ok(hex && bloom, 'NOTE_NAME_HEX and the bloom threshold are present');
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex[1].slice(i, i + 2), 16) / 255);
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    assert.ok(lum < Number(bloom[1]) - 0.02, `label luminance ${lum.toFixed(3)} must be below bloom threshold ${bloom[1]}`);
+});
+
 test('setting defaults off and is wired like the other per-frame toggles', () => {
     assert.match(src, /const BG_DEFAULTS = \{[^}]*noteNamesVisible: false/);
     assert.match(src, /const _BG_BOOL_KEYS = new Set\(\[[^\]]*'noteNamesVisible'/);
