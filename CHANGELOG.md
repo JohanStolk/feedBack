@@ -14,7 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (3rd fret on the low E reads G). It follows the song's tuning and capo, uses
   the common spelling for sharps and flats (C#, Eb, F#, Ab, Bb) with no octave
   number, and sits above any bend or hammer-on marker. Chords keep their chord
-  name instead.
+  name instead. Two filters reduce clutter while learning: **only notes held
+  at least N seconds** (default 0.2 s, off by default), and **per-string
+  checkboxes** (e.g. only Low E) using the same named strings and colours as
+  Highway String Colors, so they work the same on 4/5-string bass and 6/7/8-string
+  guitar and in alternate tunings.
 - **Core reader for source rigs (feedpak 1.18.0).** A pack can declare what a
   MIDI part should sound like by binding a rig; core now reads that binding and
   hands it to the client instead of dropping it. Three parts: the

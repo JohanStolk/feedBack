@@ -98,11 +98,54 @@ test('the label uses the sliding fret only while the gem is gliding', () => {
     assert.match(src, /const nameFret = slideXNow !== 0 \? slideFretNow\(n, now, slideSt\) : n\.f;/);
 });
 
+// String filter: slot names per string index, mirroring core's highway colors.
+const slots = new Function(
+    slice(/const NOTE_NAME_SLOT_KEYS = /, ';\n')
+    + '\n' + slice(/function _noteNameSlotKeysForChart\(/, '\n    }\n')
+    + '\nreturn { NOTE_NAME_SLOT_KEYS, _noteNameSlotKeysForChart };',
+)();
+
+test('strings are named like core\'s Highway String Colors for every instrument', () => {
+    const k = slots._noteNameSlotKeysForChart;
+    assert.deepEqual(k(4, true), ['lowE', 'A', 'D', 'G']);                         // 4-string bass
+    assert.deepEqual(k(5, true), ['low7', 'lowE', 'A', 'D', 'G']);                 // 5-string bass (low B)
+    assert.deepEqual(k(6, false), ['lowE', 'A', 'D', 'G', 'B', 'highE']);          // guitar
+    assert.deepEqual(k(7, false), ['low7', 'lowE', 'A', 'D', 'G', 'B', 'highE']);  // 7-string (low B)
+    assert.deepEqual(k(8, false), ['low8', 'low7', 'lowE', 'A', 'D', 'G', 'B', 'highE']);
+    assert.deepEqual(slots.NOTE_NAME_SLOT_KEYS, ['lowE', 'A', 'D', 'G', 'B', 'highE', 'low7', 'low8']);
+});
+
+test('the slot mapping matches core highway-colors.js exactly', () => {
+    const core = fs.readFileSync(path.join(__dirname, '..', '..', 'static', 'js', 'highway-colors.js'), 'utf8');
+    const fn = core.match(/function _hwcSlotKeysForChart\(sc, isBass\) \{[\s\S]*?\n\}/);
+    assert.ok(fn, 'core _hwcSlotKeysForChart present');
+    const coreMap = new Function(fn[0] + '\nreturn _hwcSlotKeysForChart;')();
+    for (const [sc, bass] of [[4, true], [5, true], [6, true], [6, false], [7, false], [8, false]]) {
+        assert.deepEqual(slots._noteNameSlotKeysForChart(sc, bass), coreMap(sc, bass), `${sc}/${bass}`);
+    }
+});
+
+test('long-notes-only and string filters gate the label', () => {
+    assert.match(src, /&& _noteNameStringOn\[s\]\n\s*&& \(!noteNamesLongOnly \|\| \(n\.sus \|\| 0\) >= noteNamesMinSustain\)\) \{/);
+    assert.match(src, /noteNamesLongOnly: false, noteNamesMinSustain: 0\.2, noteNamesStrings: NOTE_NAME_SLOT_KEYS\.join\(','\)/);
+    assert.match(src, /'noteNamesVisible', 'noteNamesLongOnly',/);
+    // Minimum length is clamped to 0.05..2 s; unknown string keys are dropped.
+    assert.match(src, /key === 'noteNamesMinSustain'[\s\S]{0,200}Math\.max\(0\.05, Math\.min\(2, n\)\)/);
+    assert.match(src, /key === 'noteNamesStrings'[\s\S]{0,400}NOTE_NAME_SLOT_KEYS\.filter\(\(k\) => want\.has\(k\)\)/);
+    for (const k of ['noteNamesLongOnly', 'noteNamesMinSustain', 'noteNamesStrings']) {
+        assert.match(src, new RegExp(`changedKey === '${k}'`));
+        assert.match(src, new RegExp(`${k} = _bgReadSetting\\(panelKey, '${k}'\\)`));
+    }
+    assert.match(src, /window\.h3dBgSetNoteNamesStrings = /);
+    // The per-string flags are recomputed when the string selection changes.
+    assert.match(src, /\+ '\|' \+ noteNamesStrings;/);
+});
+
 test('setting defaults off and is wired like the other per-frame toggles', () => {
     assert.match(src, /const BG_DEFAULTS = \{[^}]*noteNamesVisible: false/);
     assert.match(src, /const _BG_BOOL_KEYS = new Set\(\[[^\]]*'noteNamesVisible'/);
     assert.match(src, /window\.h3dBgSetNoteNamesVisible = \(v\) => _bgWriteGlobal\('noteNamesVisible', !!v\)/);
-    assert.match(src, /changedKey === 'noteNamesVisible'\) \{/);
+    assert.match(src, /changedKey === 'noteNamesVisible' \|\|/);
     assert.match(src, /noteNamesVisible = _bgReadSetting\(panelKey, 'noteNamesVisible'\)/);
 });
 
@@ -112,7 +155,7 @@ test('labels come from a pool that is reset every frame', () => {
 });
 
 test('only single notes get a name (chords keep their chord name)', () => {
-    assert.match(src, /if \(noteNamesVisible && !fromChord && _noteNameOpenMidi\[s\] !== undefined\)/);
+    assert.match(src, /if \(noteNamesVisible && !fromChord && _noteNameOpenMidi\[s\] !== undefined\n/);
 });
 
 test('settings page has the checkbox and mirrors the default', () => {
@@ -120,4 +163,9 @@ test('settings page has the checkbox and mirrors the default', () => {
     assert.match(html, /id="h3d-note-names-visible"[\s\S]*?window\.h3dBgSetNoteNamesVisible\(this\.checked\)/);
     assert.match(html, /const DEFAULTS = \{[^}]*noteNamesVisible: false/);
     assert.match(html, /localStorage\.getItem\('h3d_bg_noteNamesVisible'\)/);
+    assert.match(html, /id="h3d-note-names-long-only"[\s\S]*?h3dBgSetNoteNamesLongOnly\(this\.checked\)/);
+    assert.match(html, /id="h3d-note-names-min-sustain" min="0\.05" max="2" step="0\.05"/);
+    assert.match(html, /id="h3d-note-names-strings"/);
+    // settings.html's DEFAULTS mirror must match the renderer's defaults.
+    assert.match(html, /noteNamesLongOnly: false, noteNamesMinSustain: 0\.2, noteNamesStrings: 'lowE,A,D,G,B,highE,low7,low8'/);
 });

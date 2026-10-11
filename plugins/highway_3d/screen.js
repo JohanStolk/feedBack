@@ -868,6 +868,32 @@
         return _NOTE_NAMES_COMMON[(m % 12 + 12) % 12];
     }
 
+    // Named strings for the note-name string filter: the same slot keys and
+    // per-chart mapping as core's "Highway String Colors" (highway-colors.js),
+    // so a string keeps its name and colour across instruments and tunings
+    // (drop D's low string is still lowE; a 5-string bass's low B is low7).
+    const NOTE_NAME_SLOT_KEYS = ['lowE', 'A', 'D', 'G', 'B', 'highE', 'low7', 'low8'];
+
+    /** Slot key per string index (0 = lowest) for a chart; core's mapping when available. */
+    function _noteNameSlotKeysForChart(sc, isBass) {
+        const api = (typeof window !== 'undefined' && window.feedBack) ? window.feedBack.highwayColors : null;
+        if (api && typeof api.keysForChart === 'function') {
+            try {
+                const k = api.keysForChart(sc, isBass);
+                if (Array.isArray(k) && k.length) return k;
+            } catch (_) { /* fall back to the mirror below */ }
+        }
+        sc = Math.max(1, Math.min(8, (sc | 0) || 6));
+        if (isBass) {
+            if (sc <= 4) return ['lowE', 'A', 'D', 'G'].slice(0, sc);
+            if (sc === 5) return ['low7', 'lowE', 'A', 'D', 'G'];
+            return ['low8', 'low7', 'lowE', 'A', 'D', 'G'].slice(0, sc);
+        }
+        if (sc <= 6) return ['lowE', 'A', 'D', 'G', 'B', 'highE'].slice(0, sc);
+        if (sc === 7) return ['low7', 'lowE', 'A', 'D', 'G', 'B', 'highE'];
+        return ['low8', 'low7', 'lowE', 'A', 'D', 'G', 'B', 'highE'];
+    }
+
     /**
      * @param {number} nEffective string count clamped like nStr / resolveStringCount
      * @param {Record<string, unknown>} songInfo WS song_info blob (subset)
@@ -2427,7 +2453,7 @@
         return _bgBandsCache;
     }
 
-    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, noteNamesVisible: false, hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true };
+    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, noteNamesVisible: false, noteNamesLongOnly: false, noteNamesMinSustain: 0.2, noteNamesStrings: NOTE_NAME_SLOT_KEYS.join(','), hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true };
     // User-selectable, persistable bg styles — must mirror settings.html's
     // VALID_STYLES. 'venue' is deliberately NOT here: it is an internal effective
     // style reached only via _venueSceneOverride (the viz-picker Venue flow), so
@@ -2837,7 +2863,7 @@
     // means (fall back to default rather than silently flipping to
     // false). Add new boolean keys to BG_DEFAULTS and they pick this
     // up via the dispatch below.
-    const _BG_BOOL_KEYS = new Set(['reactive', 'showFretOnNote', 'cameraLockLow', 'inlayLabelsVisible', 'sectionLabelsOnHighway', 'sectionHudVisible', 'nutHeadstockVisible', 'tuningLabelsVisible', 'projectionVisible', 'chordDiagramVisible', 'fpsVisible', 'toneHudVisible', 'fretDividersVisible', 'slideArrowApproachVisible', 'slideArrowNeckVisible', 'slideArrowChainPreviewVisible', 'noteNamesVisible', 'sparks', 'cinematic', 'verdictMarks', 'timingFx', 'streakFx', 'bloom']);
+    const _BG_BOOL_KEYS = new Set(['reactive', 'showFretOnNote', 'cameraLockLow', 'inlayLabelsVisible', 'sectionLabelsOnHighway', 'sectionHudVisible', 'nutHeadstockVisible', 'tuningLabelsVisible', 'projectionVisible', 'chordDiagramVisible', 'fpsVisible', 'toneHudVisible', 'fretDividersVisible', 'slideArrowApproachVisible', 'slideArrowNeckVisible', 'slideArrowChainPreviewVisible', 'noteNamesVisible', 'noteNamesLongOnly', 'sparks', 'cinematic', 'verdictMarks', 'timingFx', 'streakFx', 'bloom']);
     function _bgCoerceBool(val, fallback) {
         if (val === 'true' || val === '1') return true;
         if (val === 'false' || val === '0') return false;
@@ -2876,6 +2902,17 @@
             const t = val.trim();
             if (/^#[0-9a-fA-F]{6}$/.test(t)) return t.toLowerCase();
             return BG_DEFAULTS[key];
+        }
+        if (key === 'noteNamesMinSustain') {
+            const n = parseFloat(val);
+            return Number.isFinite(n) ? Math.max(0.05, Math.min(2, n)) : BG_DEFAULTS.noteNamesMinSustain;
+        }
+        if (key === 'noteNamesStrings') {
+            // Comma list of slot keys; unknown keys dropped, canonical order.
+            // '' (no strings) is valid and simply shows no names.
+            if (typeof val !== 'string') return BG_DEFAULTS.noteNamesStrings;
+            const want = new Set(val.split(',').map((t) => t.trim()));
+            return NOTE_NAME_SLOT_KEYS.filter((k) => want.has(k)).join(',');
         }
         if (key === 'fretColumnMarkerCadence') {
             const n = parseInt(val, 10);
@@ -3007,6 +3044,11 @@
     window.h3dBgSetSlideArrowNeckVisible     = (v) => _bgWriteGlobal('slideArrowNeckVisible', !!v);
     window.h3dBgSetSlideArrowChainPreviewVisible = (v) => _bgWriteGlobal('slideArrowChainPreviewVisible', !!v);
     window.h3dBgSetNoteNamesVisible = (v) => _bgWriteGlobal('noteNamesVisible', !!v);
+    window.h3dBgSetNoteNamesLongOnly = (v) => _bgWriteGlobal('noteNamesLongOnly', !!v);
+    window.h3dBgSetNoteNamesMinSustain = (v) => _bgWriteGlobal('noteNamesMinSustain', _bgCoerce('noteNamesMinSustain', String(v)));
+    // Accepts an array of slot keys or a comma list.
+    window.h3dBgSetNoteNamesStrings = (v) => _bgWriteGlobal('noteNamesStrings',
+        _bgCoerce('noteNamesStrings', Array.isArray(v) ? v.join(',') : String(v)));
     // Custom image asset for the 'image' bg style (#19). Composite setter:
     // writes both the data URL (the bytes that drive the texture) and the
     // display filename, each emitting a change event. The listener
@@ -4933,7 +4975,11 @@
         // Open-string MIDI per string + capo for the note-name labels; refreshed
         // in update() only when tuning / capo / string count change.
         const _noteNameOpenMidi = [];
+        const _noteNameStringOn = [];   // per string index: name this string?
         let _noteNameCapo = 0, _noteNameKey = '';
+        let noteNamesLongOnly = BG_DEFAULTS.noteNamesLongOnly;     // only notes held >= min
+        let noteNamesMinSustain = BG_DEFAULTS.noteNamesMinSustain; // seconds
+        let noteNamesStrings = BG_DEFAULTS.noteNamesStrings;       // enabled slot keys (CSV)
         let slideArrowChainPreviewVisible = BG_DEFAULTS.slideArrowChainPreviewVisible; // early neck preview for chained/multi-leg slides
         let _vibrancyIdleOp = 0.4  + 0.6  * BG_DEFAULTS.vibrancy;
         let _vibrancyProjOp = 0.15 + 0.35 * BG_DEFAULTS.vibrancy;
@@ -8530,7 +8576,10 @@
                     changedKey === 'slideArrowApproachVisible' ||
                     changedKey === 'slideArrowNeckVisible' ||
                     changedKey === 'slideArrowChainPreviewVisible' ||
-                    changedKey === 'noteNamesVisible') {
+                    changedKey === 'noteNamesVisible' ||
+                    changedKey === 'noteNamesLongOnly' ||
+                    changedKey === 'noteNamesMinSustain' ||
+                    changedKey === 'noteNamesStrings') {
                     // Flag flips don't need a mesh rebuild — just refresh
                     // the per-instance state for the next frame to consult.
                     // Same shape for showFretOnNote (#12), cameraSmoothing
@@ -8856,6 +8905,9 @@
             slideArrowNeckVisible     = _bgReadSetting(panelKey, 'slideArrowNeckVisible');
             slideArrowChainPreviewVisible = _bgReadSetting(panelKey, 'slideArrowChainPreviewVisible');
             noteNamesVisible = _bgReadSetting(panelKey, 'noteNamesVisible');
+            noteNamesLongOnly = _bgReadSetting(panelKey, 'noteNamesLongOnly');
+            noteNamesMinSustain = _bgReadSetting(panelKey, 'noteNamesMinSustain');
+            noteNamesStrings = _bgReadSetting(panelKey, 'noteNamesStrings');
             _vibrancyIdleOp = 0.4  + 0.6  * vibrancy;
             _vibrancyProjOp = 0.15 + 0.35 * vibrancy;
             // Custom image asset is a single GLOBAL slot — bytes are
@@ -14265,15 +14317,20 @@
                 : (Array.isArray(info.tuning) ? info.tuning : []);
             const capo = Number.isFinite(bundle.capo) ? bundle.capo
                 : (Number.isFinite(info.capo) ? info.capo : 0);
-            const key = nStr + '|' + (info.arrangement || '') + '|' + tuning.join(',') + '|' + capo;
+            const key = nStr + '|' + (info.arrangement || '') + '|' + tuning.join(',') + '|' + capo
+                + '|' + noteNamesStrings;
             if (key === _noteNameKey) return;
             _noteNameKey = key;
             _noteNameCapo = capo;
             const base = _baseOpenStringMidis(nStr, info.arrangement);
+            const slots = _noteNameSlotKeysForChart(nStr, /bass/i.test(info.arrangement || ''));
+            const enabled = new Set(String(noteNamesStrings || '').split(','));
             _noteNameOpenMidi.length = 0;
+            _noteNameStringOn.length = 0;
             for (let i = 0; i < nStr; i++) {
                 const off = Number.isFinite(tuning[i]) ? tuning[i] : 0;
                 _noteNameOpenMidi.push((base[i] !== undefined ? base[i] : 40) + off);
+                _noteNameStringOn.push(enabled.has(slots[i]));
             }
         }
 
@@ -15135,7 +15192,9 @@
                 // bend chevron or H/P triangle. Fades in like the fret label;
                 // stays while a sustain is held. During a slide it names the
                 // fret the gliding gem is over, not the starting fret.
-                if (noteNamesVisible && !fromChord && _noteNameOpenMidi[s] !== undefined) {
+                if (noteNamesVisible && !fromChord && _noteNameOpenMidi[s] !== undefined
+                    && _noteNameStringOn[s]
+                    && (!noteNamesLongOnly || (n.sus || 0) >= noteNamesMinSustain)) {
                     const nameAlpha = dt >= 0
                         ? Math.min(1.0, (AHEAD - dt) / 0.35)
                         : (sustained ? 1.0 : 0);
