@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **3D Highway: note names above notes (optional).** A new Settings →
+  3D Highway — Notes toggle, "Show note names above notes" (off by default),
+  shows each single note's name above its gem as it comes down the highway
+  (3rd fret on the low E reads G). It follows the song's tuning and capo, uses
+  the common spelling for sharps and flats (C#, Eb, F#, Ab, Bb) with no octave
+  number, and sits above any bend or hammer-on marker. Chords keep their chord
+  name instead.
 - **Core reader for source rigs (feedpak 1.18.0).** A pack can declare what a
   MIDI part should sound like by binding a rig; core now reads that binding and
   hands it to the client instead of dropping it. Three parts: the

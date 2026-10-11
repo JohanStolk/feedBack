@@ -852,6 +852,22 @@
         return n + octave;
     }
 
+    // On-note name labels (noteNamesVisible): the usual chart spelling for each
+    // pitch class, sharps or flats by common use. No octave number.
+    const _NOTE_NAMES_COMMON = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+
+    /**
+     * Name of the note at `fret` on a string whose open (uncapoed) pitch is
+     * `openMidi`. Chart fret numbers count from the nut, so a capo only raises
+     * open strings (fret 0); fretted notes already include it.
+     */
+    function _noteNameForFret(openMidi, fret, capo) {
+        const f = Number.isFinite(fret) ? fret : 0;
+        const c = Number.isFinite(capo) ? capo : 0;
+        const m = Math.round(openMidi + (f > 0 ? f : c));
+        return _NOTE_NAMES_COMMON[(m % 12 + 12) % 12];
+    }
+
     /**
      * @param {number} nEffective string count clamped like nStr / resolveStringCount
      * @param {Record<string, unknown>} songInfo WS song_info blob (subset)
@@ -1458,6 +1474,7 @@
 
     /** Fret-number label tints — gold on approaching/active notes, muted blue when idle. */
     const FRET_LABEL_GOLD_HEX = '#D8A636';
+    const NOTE_NAME_HEX = '#ffffff';  // on-note name labels (noteNamesVisible)
     const FRET_LABEL_IDLE_HEX = '#9ab8cc';
 
     /** 3D chord-box rim bars (thin on all chords, including repeats in a sequence). */
@@ -2397,7 +2414,7 @@
         return _bgBandsCache;
     }
 
-    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true };
+    const BG_DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, noteNamesVisible: false, hitFx: 0.7, sparks: true, cinematic: true, verdictMarks: true, timingFx: true, streakFx: true, bloom: true };
     // User-selectable, persistable bg styles — must mirror settings.html's
     // VALID_STYLES. 'venue' is deliberately NOT here: it is an internal effective
     // style reached only via _venueSceneOverride (the viz-picker Venue flow), so
@@ -2807,7 +2824,7 @@
     // means (fall back to default rather than silently flipping to
     // false). Add new boolean keys to BG_DEFAULTS and they pick this
     // up via the dispatch below.
-    const _BG_BOOL_KEYS = new Set(['reactive', 'showFretOnNote', 'cameraLockLow', 'inlayLabelsVisible', 'sectionLabelsOnHighway', 'sectionHudVisible', 'nutHeadstockVisible', 'tuningLabelsVisible', 'projectionVisible', 'chordDiagramVisible', 'fpsVisible', 'toneHudVisible', 'fretDividersVisible', 'slideArrowApproachVisible', 'slideArrowNeckVisible', 'slideArrowChainPreviewVisible', 'sparks', 'cinematic', 'verdictMarks', 'timingFx', 'streakFx', 'bloom']);
+    const _BG_BOOL_KEYS = new Set(['reactive', 'showFretOnNote', 'cameraLockLow', 'inlayLabelsVisible', 'sectionLabelsOnHighway', 'sectionHudVisible', 'nutHeadstockVisible', 'tuningLabelsVisible', 'projectionVisible', 'chordDiagramVisible', 'fpsVisible', 'toneHudVisible', 'fretDividersVisible', 'slideArrowApproachVisible', 'slideArrowNeckVisible', 'slideArrowChainPreviewVisible', 'noteNamesVisible', 'sparks', 'cinematic', 'verdictMarks', 'timingFx', 'streakFx', 'bloom']);
     function _bgCoerceBool(val, fallback) {
         if (val === 'true' || val === '1') return true;
         if (val === 'false' || val === '0') return false;
@@ -2976,6 +2993,7 @@
     window.h3dBgSetSlideArrowApproachVisible = (v) => _bgWriteGlobal('slideArrowApproachVisible', !!v);
     window.h3dBgSetSlideArrowNeckVisible     = (v) => _bgWriteGlobal('slideArrowNeckVisible', !!v);
     window.h3dBgSetSlideArrowChainPreviewVisible = (v) => _bgWriteGlobal('slideArrowChainPreviewVisible', !!v);
+    window.h3dBgSetNoteNamesVisible = (v) => _bgWriteGlobal('noteNamesVisible', !!v);
     // Custom image asset for the 'image' bg style (#19). Composite setter:
     // writes both the data URL (the bytes that drive the texture) and the
     // display filename, each emitting a change event. The listener
@@ -4898,6 +4916,11 @@
         let projectionVisible      = BG_DEFAULTS.projectionVisible;   // board "note preview" ghost on the fretboard
         let slideArrowApproachVisible = BG_DEFAULTS.slideArrowApproachVisible; // slide-direction arrow riding with the note/gem
         let slideArrowNeckVisible      = BG_DEFAULTS.slideArrowNeckVisible;    // slide-direction arrow preview on the neck
+        let noteNamesVisible = BG_DEFAULTS.noteNamesVisible; // note name above single-note gems
+        // Open-string MIDI per string + capo for the note-name labels; refreshed
+        // in update() only when tuning / capo / string count change.
+        const _noteNameOpenMidi = [];
+        let _noteNameCapo = 0, _noteNameKey = '';
         let slideArrowChainPreviewVisible = BG_DEFAULTS.slideArrowChainPreviewVisible; // early neck preview for chained/multi-leg slides
         let _vibrancyIdleOp = 0.4  + 0.6  * BG_DEFAULTS.vibrancy;
         let _vibrancyProjOp = 0.15 + 0.35 * BG_DEFAULTS.vibrancy;
@@ -5131,6 +5154,7 @@
         let gFHXLines = null, pFHXLines = null;   // FH X lines combined geometry
         let pNoteFretLabel, pConnectorLine, pDropLine, pTapChevron, pAccentHalo;
         let pTeachMarkLbl;  // teaching marks fg/sd label sprites (§6.2.2)
+        let pNoteNameLbl;   // note-name labels above single-note gems (noteNamesVisible)
         let pHaloBar = null, gHaloBar = null; // gradient halo bar geometry — replaces per-shell pChordAccentHalo
         let gArpBracket = null; // shared 1×1×1 box geometry for pArpBracket; built once, disposed in teardown
         let pSusRibbon = null, pSusRibbonOl = null;
@@ -8325,6 +8349,12 @@
                 _tml.material.depthTest = false;
                 return _tml;
             });
+            pNoteNameLbl = pool(lblG, () => {
+                const _nnl = new T.Sprite(txtMat('C', NOTE_NAME_HEX, false, 'noteFret').clone());
+                _nnl.material.fog = false;
+                _nnl.material.depthTest = false;
+                return _nnl;
+            });
             pConnectorLine = pool(noteG, () => new T.Line(
                 new T.BufferGeometry().setFromPoints([new T.Vector3(0, 0, 0), new T.Vector3(0, 1, 0)]),
                 new T.LineBasicMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.5, depthTest: false }),
@@ -8384,6 +8414,7 @@
             pTechPlane.warm(_WARM_CHORD);
             pNoteFretLabel.warm(_WARM_NOTE);
             pTeachMarkLbl.warm(_WARM_NOTE);
+            pNoteNameLbl.warm(_WARM_NOTE);
             pChordFrameFill.warm(_WARM_CHORD);
             pChordBox.warm(_WARM_CHORD);
             pChordLbl.warm(_WARM_CHORD);
@@ -8485,7 +8516,8 @@
                     changedKey === 'projectionVisible' ||
                     changedKey === 'slideArrowApproachVisible' ||
                     changedKey === 'slideArrowNeckVisible' ||
-                    changedKey === 'slideArrowChainPreviewVisible') {
+                    changedKey === 'slideArrowChainPreviewVisible' ||
+                    changedKey === 'noteNamesVisible') {
                     // Flag flips don't need a mesh rebuild — just refresh
                     // the per-instance state for the next frame to consult.
                     // Same shape for showFretOnNote (#12), cameraSmoothing
@@ -8810,6 +8842,7 @@
             slideArrowApproachVisible = _bgReadSetting(panelKey, 'slideArrowApproachVisible');
             slideArrowNeckVisible     = _bgReadSetting(panelKey, 'slideArrowNeckVisible');
             slideArrowChainPreviewVisible = _bgReadSetting(panelKey, 'slideArrowChainPreviewVisible');
+            noteNamesVisible = _bgReadSetting(panelKey, 'noteNamesVisible');
             _vibrancyIdleOp = 0.4  + 0.6  * vibrancy;
             _vibrancyProjOp = 0.15 + 0.35 * vibrancy;
             // Custom image asset is a single GLOBAL slot — bytes are
@@ -10814,6 +10847,8 @@
                 _prewarmTex(txtMat('T', '#7fd1ff', false, 'teachFg'));
                 for (let i = 1; i <= 4; i++) _prewarmTex(txtMat(String(i), '#7fd1ff', false, 'teachFg'));
                 for (let i = 0; i <= 11; i++) _prewarmTex(txtMat(String(i), '#ffcc66', false, 'teachSd'));
+                // Note-name labels (drawNote, noteNamesVisible).
+                for (const nm of _NOTE_NAMES_COMMON) _prewarmTex(txtMat(nm, NOTE_NAME_HEX, false, 'noteFret'));
                 // Technique sprite factories (own caches, keyed by packed
                 // number): PM/FH mute X, hammer/pull triangles, bend
                 // chevron stacks, slide direction arrows — per string
@@ -10915,6 +10950,7 @@
             if (pFHXLines) pFHXLines.reset();
             pNoteFretLabel.reset(); pConnectorLine.reset(); pDropLine.reset();
             pTeachMarkLbl.reset();
+            pNoteNameLbl.reset();
             pFretColMarker.reset(); pSusRail.reset(); pSusRailBloom.reset(); pTechPlane.reset();
             // Clear per-frame queues in-place (avoid reallocating the array object).
             _ndLabels.length = 0;
@@ -11388,6 +11424,7 @@
             _drawChordTemplates = bundle.chordTemplates ?? null;
             _drawAnchors = anchors ?? null;
             _drawTeachingMarks = !!bundle.teachingMarksVisible;
+            if (noteNamesVisible) _refreshNoteNameTuning(bundle);
             // Default on: only an explicit false (older bundles omit the flag) hides fg.
             _showFingerHints = bundle.fingerHintsVisible !== false;
 
@@ -14205,6 +14242,28 @@
          * slots (always plain lead notes, where those collapse to
          * n.f/projFactor/n.f).
          */
+        // Open-string pitches for the note-name labels. Same tuning/capo source
+        // as the nut's pitch labels (_openStringPitchLabelsForTuning): bundle
+        // first (chart-transform aware), songInfo as fallback. Recomputed only
+        // when string count, arrangement, tuning or capo change.
+        function _refreshNoteNameTuning(bundle) {
+            const info = bundle.songInfo || {};
+            const tuning = Array.isArray(bundle.tuning) ? bundle.tuning
+                : (Array.isArray(info.tuning) ? info.tuning : []);
+            const capo = Number.isFinite(bundle.capo) ? bundle.capo
+                : (Number.isFinite(info.capo) ? info.capo : 0);
+            const key = nStr + '|' + (info.arrangement || '') + '|' + tuning.join(',') + '|' + capo;
+            if (key === _noteNameKey) return;
+            _noteNameKey = key;
+            _noteNameCapo = capo;
+            const base = _baseOpenStringMidis(nStr, info.arrangement);
+            _noteNameOpenMidi.length = 0;
+            for (let i = 0; i < nStr; i++) {
+                const off = Number.isFinite(tuning[i]) ? tuning[i] : 0;
+                _noteNameOpenMidi.push((base[i] !== undefined ? base[i] : 40) + off);
+            }
+        }
+
         function drawGhostFretLabel(x, y, projRim, fretDisplay, alpha, growScale, fretForScale) {
             const lb = pGhostFretLbl.get();
             const sprMat = txtMat(fretDisplay, '#ffffff', false, 'ghostFret');
@@ -15056,6 +15115,31 @@
                     harmMark.position.set(x, y + techniqueYNow, noteZ + K);
                     harmMark.rotation.z = approachRot;
                     harmMark.renderOrder = techniqueMarkerRenderOrder;
+                }
+
+                // ── Note name above the gem (opt-in, single notes only) ────
+                // Sits on top of the technique stack (yo) so it never covers a
+                // bend chevron or H/P triangle. Fades in like the fret label;
+                // stays while a sustain is held.
+                if (noteNamesVisible && !fromChord && _noteNameOpenMidi[s] !== undefined) {
+                    const nameAlpha = dt >= 0
+                        ? Math.min(1.0, (AHEAD - dt) / 0.35)
+                        : (sustained ? 1.0 : 0);
+                    if (nameAlpha > 0) {
+                        const nameLbl = pNoteNameLbl.get();
+                        const nameMat = txtMat(_noteNameForFret(_noteNameOpenMidi[s], n.f, _noteNameCapo),
+                            NOTE_NAME_HEX, false, 'noteFret');
+                        _setLabelMap(nameLbl, nameMat);
+                        // noteFret canvases widen for two-glyph names (Bb, F#);
+                        // keep the glyph aspect instead of squeezing into a square.
+                        const img = nameMat.map && nameMat.map.image;
+                        const aspect = img && img.height ? img.width / img.height : 1;
+                        const nameS = NH * 1.4 * sLbl;
+                        nameLbl.scale.set(nameS * aspect, nameS, 1);
+                        nameLbl.position.set(x, yo + nameS * 0.6, noteZ + K);
+                        nameLbl.renderOrder = techniqueMarkerRenderOrder;
+                        nameLbl.material.opacity = nameAlpha;
+                    }
                 }
 
                 // ── Per-note fret connector label ─────────────────────────

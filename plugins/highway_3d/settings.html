@@ -689,6 +689,21 @@
         </div>
     </div>
 
+    <!-- Note names above single-note gems (C, C#, D, Eb, E, F, F#, G, Ab, A, Bb, B). -->
+    <div class="mt-4">
+        <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+            <input type="checkbox" id="h3d-note-names-visible"
+                   onchange="window.h3dBgSetNoteNamesVisible && window.h3dBgSetNoteNamesVisible(this.checked)"
+                   class="accent-accent">
+            Show note names above notes
+        </label>
+        <p class="text-[10px] text-gray-500 mt-1 ml-6">
+            The note's name (e.g. G for the 3rd fret on the low E string)
+            above each single note coming down the highway. Follows the
+            song's tuning and capo. Chords keep their chord name instead.
+        </p>
+    </div>
+
     <!-- Slide direction arrow — three independent ›/‹ markers showing which
          way a slide is headed. -->
     <div class="mt-4">
@@ -956,7 +971,7 @@
          no-selection / NaN state. -->
     <script>
         (function () {
-            const DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true };
+            const DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, noteNamesVisible: false };
             const VALID_STYLES = new Set(['off', 'particles', 'silhouettes', 'lights', 'geometric', 'butterchurn', 'image', 'video']);
             // Scene color themes — the single id+label source for BOTH the
             // Background and Highway dropdowns AND the validator below. The
@@ -1112,6 +1127,7 @@
             let storedSlideArrowApproachVisible = null;
             let storedSlideArrowNeckVisible = null;
             let storedSlideArrowChainPreviewVisible = null;
+            let storedNoteNamesVisible = null;
             try {
                 storedStyle = localStorage.getItem('h3d_bg_style');
                 storedBgTheme = localStorage.getItem('h3d_bg_bgTheme');
@@ -1151,6 +1167,7 @@
                 storedSlideArrowApproachVisible = localStorage.getItem('h3d_bg_slideArrowApproachVisible');
                 storedSlideArrowNeckVisible = localStorage.getItem('h3d_bg_slideArrowNeckVisible');
                 storedSlideArrowChainPreviewVisible = localStorage.getItem('h3d_bg_slideArrowChainPreviewVisible');
+                storedNoteNamesVisible = localStorage.getItem('h3d_bg_noteNamesVisible');
                 storedCustomImageDataUrl = localStorage.getItem('h3d_bg_customImageDataUrl');
                 storedCustomImageName = localStorage.getItem('h3d_bg_customImageName');
                 storedCustomVideoName = localStorage.getItem('h3d_bg_customVideoName');
@@ -1231,6 +1248,7 @@
             const slideArrowApproachVisible = coerceBool(storedSlideArrowApproachVisible, DEFAULTS.slideArrowApproachVisible);
             const slideArrowNeckVisible = coerceBool(storedSlideArrowNeckVisible, DEFAULTS.slideArrowNeckVisible);
             const slideArrowChainPreviewVisible = coerceBool(storedSlideArrowChainPreviewVisible, DEFAULTS.slideArrowChainPreviewVisible);
+            const noteNamesVisible = coerceBool(storedNoteNamesVisible, DEFAULTS.noteNamesVisible);
             const customImageDataUrl = (typeof storedCustomImageDataUrl === 'string') ? storedCustomImageDataUrl : DEFAULTS.customImageDataUrl;
             const customImageName    = (typeof storedCustomImageName === 'string')    ? storedCustomImageName    : DEFAULTS.customImageName;
             const customVideoName    = (typeof storedCustomVideoName === 'string')    ? storedCustomVideoName    : DEFAULTS.customVideoName;
@@ -1294,6 +1312,7 @@
             const saav  = document.getElementById('h3d-slide-arrow-approach-visible');
             const sanv  = document.getElementById('h3d-slide-arrow-neck-visible');
             const sacpv = document.getElementById('h3d-slide-arrow-chain-preview-visible');
+            const nnv   = document.getElementById('h3d-note-names-visible');
             const fileInput = document.getElementById('h3d-bg-custom-image-file');
             const clearBtn  = document.getElementById('h3d-bg-custom-image-clear');
             const nameP     = document.getElementById('h3d-bg-custom-image-name');
@@ -1363,6 +1382,7 @@
             if (saav)  saav.checked = slideArrowApproachVisible;
             if (sanv)  sanv.checked = slideArrowNeckVisible;
             if (sacpv) sacpv.checked = slideArrowChainPreviewVisible;
+            if (nnv)   nnv.checked   = noteNamesVisible;
             if (slhi)  slhi.checked = sectionLabelsOnHighway;
             if (shvi)  shvi.checked = sectionHudVisible;
             if (shpos) shpos.value  = sectionHudPosition;
