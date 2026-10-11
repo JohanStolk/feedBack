@@ -70,6 +70,34 @@ test('capo raises open strings only; chart frets already count from the nut', ()
     assert.equal(_noteNameForFret(guitar[0], 3, 2), 'G');  // fret 3 is still G
 });
 
+// Slide helpers: the label names the fret the gliding gem is over.
+const slide = new Function(
+    slice(/function slideTrailEnd\(/, '\n    }\n')
+    + '\n' + slice(/function slideEaseW\(/, '\n    }\n')
+    + '\n' + slice(/function slideFretNow\(/, '\n    }\n')
+    + '\nreturn { slideFretNow };',
+)();
+
+test('during a slide the name follows the gem to the new fret', () => {
+    const n = { t: 10, f: 3, sus: 1, sl: 5 };                 // low E, 3 → 5 (G → A)
+    assert.equal(slide.slideFretNow(n, 9.5), 3);              // not yet played
+    assert.equal(slide.slideFretNow(n, 10), 3);               // onset
+    assert.equal(slide.slideFretNow(n, 11), 5);               // slide finished
+    assert.equal(slide.slideFretNow(n, 12), 5);               // lingering after it
+    assert.equal(_noteNameForFret(guitar[0], slide.slideFretNow(n, 11), 0), 'A');
+    const mid = slide.slideFretNow(n, 10.6);
+    assert.ok(mid >= 3 && mid <= 5, `mid-slide fret ${mid} stays between start and end`);
+});
+
+test('notes without a slide keep their own fret', () => {
+    assert.equal(slide.slideFretNow({ t: 0, f: 7, sus: 2 }, 1), 7);
+    assert.equal(slide.slideFretNow({ t: 0, f: 0, sus: 2, sl: 2 }, 1), 0); // open: no glide
+});
+
+test('the label uses the sliding fret only while the gem is gliding', () => {
+    assert.match(src, /const nameFret = slideXNow !== 0 \? slideFretNow\(n, now, slideSt\) : n\.f;/);
+});
+
 test('setting defaults off and is wired like the other per-frame toggles', () => {
     assert.match(src, /const BG_DEFAULTS = \{[^}]*noteNamesVisible: false/);
     assert.match(src, /const _BG_BOOL_KEYS = new Set\(\[[^\]]*'noteNamesVisible'/);

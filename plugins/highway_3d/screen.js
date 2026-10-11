@@ -1612,14 +1612,27 @@
     function slideOffsetWorldX(n, chartTime, st_) {
         const st = st_ || slideTrailEnd(n);
         if (!st || n.f <= 0 || !(n.sus > 0)) return 0;
+        return (fretMid(st.endFret) - fretMid(n.f)) * slideEaseW(n, chartTime, st);
+    }
+
+    /** Eased 0..1 progress of a slide over its sustain (pitched vs unpitched curve). */
+    function slideEaseW(n, chartTime, st) {
         const denom = Math.max(n.sus, 1e-6);
         const p = Math.max(0, Math.min(1, (chartTime - n.t) / denom));
-        const startX = fretMid(n.f);
-        const endX = fretMid(st.endFret);
-        const w = st.unpitched
+        return st.unpitched
             ? 1 - Math.sin((1 - p) * Math.PI / 2)
             : Math.pow(Math.sin(p * Math.PI / 2), 3);
-        return (endX - startX) * w;
+    }
+
+    /**
+     * Fret the gem is over right now: n.f, or during a slide the fret nearest
+     * its glide position (same easing as slideOffsetWorldX). Used by the
+     * note-name label so the name follows the gem.
+     */
+    function slideFretNow(n, chartTime, st_) {
+        const st = st_ || slideTrailEnd(n);
+        if (!st || n.f <= 0 || !(n.sus > 0) || chartTime <= n.t) return n.f;
+        return Math.round(n.f + (st.endFret - n.f) * slideEaseW(n, chartTime, st));
     }
 
     // Camera tgtDist building blocks. Both the dynamic (camera-follow)
@@ -15120,14 +15133,16 @@
                 // ── Note name above the gem (opt-in, single notes only) ────
                 // Sits on top of the technique stack (yo) so it never covers a
                 // bend chevron or H/P triangle. Fades in like the fret label;
-                // stays while a sustain is held.
+                // stays while a sustain is held. During a slide it names the
+                // fret the gliding gem is over, not the starting fret.
                 if (noteNamesVisible && !fromChord && _noteNameOpenMidi[s] !== undefined) {
                     const nameAlpha = dt >= 0
                         ? Math.min(1.0, (AHEAD - dt) / 0.35)
                         : (sustained ? 1.0 : 0);
                     if (nameAlpha > 0) {
                         const nameLbl = pNoteNameLbl.get();
-                        const nameMat = txtMat(_noteNameForFret(_noteNameOpenMidi[s], n.f, _noteNameCapo),
+                        const nameFret = slideXNow !== 0 ? slideFretNow(n, now, slideSt) : n.f;
+                        const nameMat = txtMat(_noteNameForFret(_noteNameOpenMidi[s], nameFret, _noteNameCapo),
                             NOTE_NAME_HEX, false, 'noteFret');
                         _setLabelMap(nameLbl, nameMat);
                         // noteFret canvases widen for two-glyph names (Bb, F#);
