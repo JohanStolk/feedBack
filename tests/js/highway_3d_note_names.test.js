@@ -59,6 +59,19 @@ test('open strings name the string; octaves are not shown', () => {
     assert.equal(_noteNameForFret(guitar[0], 12, 0), 'E');
 });
 
+test('6-string bass uses B E A D G C, the standard the GP importer offsets against', () => {
+    const bass6 = _baseOpenStringMidis(6, 'Bass');
+    assert.deepEqual(bass6.map((m) => _noteNameForFret(m, 0, 0)), ['B', 'E', 'A', 'D', 'G', 'C']);
+    assert.equal(_noteNameForFret(bass6[0], 3, 0), 'D');   // low B, fret 3
+    // Same pitches as core's importer (high→low there) and tuner profile.
+    const gp = fs.readFileSync(path.join(__dirname, '..', '..', 'lib', 'gp2rs.py'), 'utf8');
+    const gpBass = gp.match(/STANDARD_TUNING_BASS = \[([\d, ]+)\]/);
+    assert.ok(gpBass, 'STANDARD_TUNING_BASS present in lib/gp2rs.py');
+    assert.deepEqual(bass6, gpBass[1].split(',').map(Number).reverse());
+    // A 6-string guitar is unchanged.
+    assert.deepEqual(_baseOpenStringMidis(6, 'Lead'), [40, 45, 50, 55, 59, 64]);
+});
+
 test('tuning offsets shift the name (Eb standard, drop D)', () => {
     assert.equal(_noteNameForFret(guitar[0] - 1, 0, 0), 'Eb');
     assert.equal(_noteNameForFret(guitar[0] - 2, 0, 0), 'D');

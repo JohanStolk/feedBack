@@ -18,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at least N seconds** (default 0.2 s, off by default), and **per-string
   checkboxes** (e.g. only Low E) using the same named strings and colours as
   Highway String Colors, so they work the same on 4/5-string bass and 6/7/8-string
-  guitar and in alternate tunings.
+  guitar and in alternate tunings. A 6-string bass now uses its real standard
+  (B E A D G C) for these names and for the nut's open-string labels, instead
+  of guitar pitches.
 - **Core reader for source rigs (feedpak 1.18.0).** A pack can declare what a
   MIDI part should sound like by binding a rig; core now reads that binding and
   hands it to the client instead of dropping it. Three parts: the

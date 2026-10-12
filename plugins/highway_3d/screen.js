@@ -818,6 +818,9 @@
     // Open-string MIDI (thick → thin), matched to RS string index 0 low.
     const _BASE_OPEN_MIDI_BASS4 = Object.freeze([28, 33, 38, 43]);
     const _BASE_OPEN_MIDI_BASS5 = Object.freeze([23, 28, 33, 38, 43]);
+    // B E A D G C — the standard the GP importer writes 6-string bass tuning
+    // offsets against (lib/gp2rs.py STANDARD_TUNING_BASS, lib/tunings.py bass-6).
+    const _BASE_OPEN_MIDI_BASS6 = Object.freeze([23, 28, 33, 38, 43, 48]);
     const _BASE_OPEN_MIDI_GUITAR6 = Object.freeze([40, 45, 50, 55, 59, 64]);
     const _BASE_OPEN_MIDI_GUITAR7 = Object.freeze([35, 40, 45, 50, 55, 59, 64]);
     // F#/B/E standard extension — low string is a fifth below RS 7‑string low B.
@@ -829,6 +832,7 @@
         if (sc === 4) return _BASE_OPEN_MIDI_GUITAR6.slice(0, 4);
         if (sc === 5 && isBass) return _BASE_OPEN_MIDI_BASS5.slice();
         if (sc === 5) return _BASE_OPEN_MIDI_GUITAR6.slice(0, 5);
+        if (sc === 6 && isBass) return _BASE_OPEN_MIDI_BASS6.slice();
         if (sc === 7) return _BASE_OPEN_MIDI_GUITAR7.slice();
         if (sc === 8) return _BASE_OPEN_MIDI_GUITAR8.slice();
         if (Number.isFinite(sc) && sc > 8) {
