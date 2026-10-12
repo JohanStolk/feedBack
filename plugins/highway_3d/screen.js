@@ -872,30 +872,27 @@
         return _NOTE_NAMES_COMMON[(m % 12 + 12) % 12];
     }
 
-    // Named strings for the note-name string filter: the same slot keys and
-    // per-chart mapping as core's "Highway String Colors" (highway-colors.js),
-    // so a string keeps its name and colour across instruments and tunings
-    // (drop D's low string is still lowE; a 5-string bass's low B is low7).
+    // Named strings for the note-name string filter: core's "Highway String
+    // Colors" slot keys, so a string keeps its name and colour across
+    // instruments and tunings (drop D's low string is still lowE; a 5-string
+    // bass's low B is low7). The per-chart mapping comes from core only, never
+    // a local copy, so the two can't drift apart.
     const NOTE_NAME_SLOT_KEYS = ['lowE', 'A', 'D', 'G', 'B', 'highE', 'low7', 'low8'];
 
-    /** Slot key per string index (0 = lowest) for a chart; core's mapping when available. */
+    /**
+     * Slot key per string index (0 = lowest) for a chart, from core's
+     * window.feedBack.highwayColors.keysForChart; null on a core without that
+     * API (the string filter then names every string).
+     */
     function _noteNameSlotKeysForChart(sc, isBass) {
         const api = (typeof window !== 'undefined' && window.feedBack) ? window.feedBack.highwayColors : null;
-        if (api && typeof api.keysForChart === 'function') {
-            try {
-                const k = api.keysForChart(sc, isBass);
-                if (Array.isArray(k) && k.length) return k;
-            } catch (_) { /* fall back to the mirror below */ }
+        if (!api || typeof api.keysForChart !== 'function') return null;
+        try {
+            const k = api.keysForChart(sc, isBass);
+            return Array.isArray(k) && k.length ? k : null;
+        } catch (_) {
+            return null;
         }
-        sc = Math.max(1, Math.min(8, (sc | 0) || 6));
-        if (isBass) {
-            if (sc <= 4) return ['lowE', 'A', 'D', 'G'].slice(0, sc);
-            if (sc === 5) return ['low7', 'lowE', 'A', 'D', 'G'];
-            return ['low8', 'low7', 'lowE', 'A', 'D', 'G'].slice(0, sc);
-        }
-        if (sc <= 6) return ['lowE', 'A', 'D', 'G', 'B', 'highE'].slice(0, sc);
-        if (sc === 7) return ['low7', 'lowE', 'A', 'D', 'G', 'B', 'highE'];
-        return ['low8', 'low7', 'lowE', 'A', 'D', 'G', 'B', 'highE'];
     }
 
     /**
@@ -14338,7 +14335,7 @@
             for (let i = 0; i < nStr; i++) {
                 const off = Number.isFinite(tuning[i]) ? tuning[i] : 0;
                 _noteNameOpenMidi.push((base[i] !== undefined ? base[i] : 40) + off);
-                _noteNameStringOn.push(enabled.has(slots[i]));
+                _noteNameStringOn.push(slots ? enabled.has(slots[i]) : true);
             }
         }
 

@@ -111,31 +111,34 @@ test('the label uses the sliding fret only while the gem is gliding', () => {
     assert.match(src, /const nameFret = slideXNow !== 0 \? slideFretNow\(n, now, slideSt\) : n\.f;/);
 });
 
-// String filter: slot names per string index, mirroring core's highway colors.
-const slots = new Function(
+// String filter: the slot mapping comes from core's highway colors API only.
+const slots = new Function('window',
     slice(/const NOTE_NAME_SLOT_KEYS = /, ';\n')
     + '\n' + slice(/function _noteNameSlotKeysForChart\(/, '\n    }\n')
-    + '\nreturn { NOTE_NAME_SLOT_KEYS, _noteNameSlotKeysForChart };',
-)();
+    + '\nreturn { NOTE_NAME_SLOT_KEYS, _noteNameSlotKeysForChart };');
 
-test('strings are named like core\'s Highway String Colors for every instrument', () => {
-    const k = slots._noteNameSlotKeysForChart;
-    assert.deepEqual(k(4, true), ['lowE', 'A', 'D', 'G']);                         // 4-string bass
-    assert.deepEqual(k(5, true), ['low7', 'lowE', 'A', 'D', 'G']);                 // 5-string bass (low B)
-    assert.deepEqual(k(6, false), ['lowE', 'A', 'D', 'G', 'B', 'highE']);          // guitar
-    assert.deepEqual(k(7, false), ['low7', 'lowE', 'A', 'D', 'G', 'B', 'highE']);  // 7-string (low B)
-    assert.deepEqual(k(8, false), ['low8', 'low7', 'lowE', 'A', 'D', 'G', 'B', 'highE']);
-    assert.deepEqual(slots.NOTE_NAME_SLOT_KEYS, ['lowE', 'A', 'D', 'G', 'B', 'highE', 'low7', 'low8']);
+test('string slots come straight from core\'s keysForChart', () => {
+    const seen = [];
+    const api = { keysForChart(sc, isBass) { seen.push([sc, isBass]); return ['low7', 'lowE', 'A', 'D', 'G']; } };
+    const { _noteNameSlotKeysForChart } = slots({ feedBack: { highwayColors: api } });
+    assert.deepEqual(_noteNameSlotKeysForChart(5, true), ['low7', 'lowE', 'A', 'D', 'G']);
+    assert.deepEqual(seen, [[5, true]]);
 });
 
-test('the slot mapping matches core highway-colors.js exactly', () => {
+test('without core\'s colors API the filter names every string', () => {
+    assert.equal(slots({ feedBack: {} })._noteNameSlotKeysForChart(4, true), null);
+    assert.equal(slots(undefined)._noteNameSlotKeysForChart(6, false), null);
+    const throwing = { feedBack: { highwayColors: { keysForChart() { throw new Error('x'); } } } };
+    assert.equal(slots(throwing)._noteNameSlotKeysForChart(6, false), null);
+    // null slots → every string on.
+    assert.match(src, /_noteNameStringOn\.push\(slots \? enabled\.has\(slots\[i\]\) : true\);/);
+});
+
+test('the setting uses exactly core\'s named string slots', () => {
     const core = fs.readFileSync(path.join(__dirname, '..', '..', 'static', 'js', 'highway-colors.js'), 'utf8');
-    const fn = core.match(/function _hwcSlotKeysForChart\(sc, isBass\) \{[\s\S]*?\n\}/);
-    assert.ok(fn, 'core _hwcSlotKeysForChart present');
-    const coreMap = new Function(fn[0] + '\nreturn _hwcSlotKeysForChart;')();
-    for (const [sc, bass] of [[4, true], [5, true], [6, true], [6, false], [7, false], [8, false]]) {
-        assert.deepEqual(slots._noteNameSlotKeysForChart(sc, bass), coreMap(sc, bass), `${sc}/${bass}`);
-    }
+    const coreKeys = [...core.matchAll(/\{ key: '([A-Za-z0-9]+)', label:/g)].map((m) => m[1]);
+    const { NOTE_NAME_SLOT_KEYS } = slots({});
+    assert.deepEqual([...NOTE_NAME_SLOT_KEYS].sort(), [...coreKeys].sort());
 });
 
 test('long-notes-only and string filters gate the label', () => {
