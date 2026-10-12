@@ -14329,13 +14329,15 @@
             _noteNameCapo = capo;
             const base = _baseOpenStringMidis(nStr, info.arrangement);
             const slots = _noteNameSlotKeysForChart(nStr, /bass/i.test(info.arrangement || ''));
-            const enabled = new Set(String(noteNamesStrings || '').split(','));
+            const enabled = new Set(String(noteNamesStrings || '').split(',').filter(Boolean));
             _noteNameOpenMidi.length = 0;
             _noteNameStringOn.length = 0;
             for (let i = 0; i < nStr; i++) {
                 const off = Number.isFinite(tuning[i]) ? tuning[i] : 0;
                 _noteNameOpenMidi.push((base[i] !== undefined ? base[i] : 40) + off);
-                _noteNameStringOn.push(slots ? enabled.has(slots[i]) : true);
+                // Without core's slot mapping a partial selection can't be applied,
+                // so name every string, unless the user selected none at all.
+                _noteNameStringOn.push(slots ? enabled.has(slots[i]) : enabled.size > 0);
             }
         }
 

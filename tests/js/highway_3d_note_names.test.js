@@ -130,8 +130,9 @@ test('without core\'s colors API the filter names every string', () => {
     assert.equal(slots(undefined)._noteNameSlotKeysForChart(6, false), null);
     const throwing = { feedBack: { highwayColors: { keysForChart() { throw new Error('x'); } } } };
     assert.equal(slots(throwing)._noteNameSlotKeysForChart(6, false), null);
-    // null slots → every string on.
-    assert.match(src, /_noteNameStringOn\.push\(slots \? enabled\.has\(slots\[i\]\) : true\);/);
+    // null slots → every string on, unless the selection is empty (then none).
+    assert.match(src, /new Set\(String\(noteNamesStrings \|\| ''\)\.split\(','\)\.filter\(Boolean\)\)/);
+    assert.match(src, /_noteNameStringOn\.push\(slots \? enabled\.has\(slots\[i\]\) : enabled\.size > 0\);/);
 });
 
 test('the setting uses exactly core\'s named string slots', () => {
