@@ -888,7 +888,7 @@
         return offs.map((o) => o !== common);
     }
 
-    // The desktop app's virtual drop tuning shifts the instrument's
+    // The desktop app's virtual tuning shifts the instrument's
     // input, so the player fingers a standard-tuned instrument while hearing
     // the song's tuning. The desktop publishes window.feedBack.virtualTuning =
     // { active, mode }; a plain property read, cheap enough per frame.
