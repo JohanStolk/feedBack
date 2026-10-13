@@ -22,8 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (B E A D G C) for these names and for the nut's open-string labels, instead
   of guitar pitches.
   Strings a song retunes away from the rest (Drop D's low string) hide their
-  names by default, since their frets no longer match the familiar names
-  (option "Hide names on retuned strings").
+  names by default, since their frets no longer match the familiar names; and
+  while the desktop app's virtual drop tuning shifts the instrument, names can
+  follow the fingered standard-tuning notes instead (both options on by default).
 - **Core reader for source rigs (feedpak 1.18.0).** A pack can declare what a
   MIDI part should sound like by binding a rig; core now reads that binding and
   hands it to the client instead of dropping it. Three parts: the

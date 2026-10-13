@@ -156,7 +156,7 @@ test('long-notes-only and string filters gate the label', () => {
     }
     assert.match(src, /window\.h3dBgSetNoteNamesStrings = /);
     // The per-string flags are recomputed when the string selection changes.
-    assert.match(src, /\+ '\|' \+ noteNamesStrings \+ '\|' \+ noteNamesHideRetuned;/);
+    assert.match(src, /\+ '\|' \+ noteNamesStrings \+ '\|' \+ noteNamesHideRetuned \+ '\|' \+ fingered;/);
 });
 
 test('note names stay below the bloom threshold so they render crisp, not hazy', () => {
@@ -212,19 +212,26 @@ test('retuned strings: only strings tuned away from the rest', () => {
     assert.deepEqual(_noteNameRetunedStrings([-2], 4), [true, false, false, false]);
 });
 
-test('the hide-retuned option is wired like the other note-name settings', () => {
-    assert.match(src, /noteNamesStrings: NOTE_NAME_SLOT_KEYS\.join\(','\), noteNamesHideRetuned: true,/);
-    assert.match(src, /'noteNamesHideRetuned', 'sparks',/);
-    for (const k of ['noteNamesHideRetuned']) {
+test('hide-retuned and fingered-name options are wired like the other note-name settings', () => {
+    assert.match(src, /noteNamesStrings: NOTE_NAME_SLOT_KEYS\.join\(','\), noteNamesHideRetuned: true, noteNamesFingered: true,/);
+    assert.match(src, /'noteNamesHideRetuned', 'noteNamesFingered',/);
+    for (const k of ['noteNamesHideRetuned', 'noteNamesFingered']) {
         assert.match(src, new RegExp(`changedKey === '${k}'`));
         assert.match(src, new RegExp(`${k} = _bgReadSetting\\(panelKey, '${k}'\\)`));
         assert.match(src, new RegExp(`window\\.h3dBgSetNoteNames${k.slice(9)} = \\(v\\) => _bgWriteGlobal\\('${k}', !!v\\)`));
     }
-    assert.match(src, /const retuned = noteNamesHideRetuned \? _noteNameRetunedStrings\(tuning, nStr\) : null;/);
+    // Fingered names apply only while the desktop's virtual tuning is active,
+    // drop the song's offsets, and switch hiding off.
+    assert.match(src, /const fingered = noteNamesFingered && _virtualTuningActive\(\);/);
+    assert.match(src, /const retuned = noteNamesHideRetuned && !fingered \? _noteNameRetunedStrings\(tuning, nStr\) : null;/);
+    assert.match(src, /const off = !fingered && Number\.isFinite\(tuning\[i\]\) \? tuning\[i\] : 0;/);
     assert.match(src, /&& !\(retuned && retuned\[i\]\)\);/);
+    assert.match(src, /const vt = window\.feedBack && window\.feedBack\.virtualTuning;/);
 
     const html = fs.readFileSync(SETTINGS_HTML, 'utf8');
-    assert.match(html, /noteNamesHideRetuned: true \};/);
+    assert.match(html, /noteNamesHideRetuned: true, noteNamesFingered: true \};/);
     assert.match(html, /id="h3d-note-names-hide-retuned"[\s\S]{0,200}h3dBgSetNoteNamesHideRetuned\(this\.checked\)/);
+    assert.match(html, /id="h3d-note-names-fingered"[\s\S]{0,200}h3dBgSetNoteNamesFingered\(this\.checked\)/);
     assert.match(html, /localStorage\.getItem\('h3d_bg_noteNamesHideRetuned'\)/);
+    assert.match(html, /localStorage\.getItem\('h3d_bg_noteNamesFingered'\)/);
 });
