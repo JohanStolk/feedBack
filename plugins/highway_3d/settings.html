@@ -730,6 +730,17 @@
                 5-string bass, Low F# of an 8-string. Strings a song doesn't have
                 are ignored.
             </p>
+            <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                <input type="checkbox" id="h3d-note-names-hide-retuned"
+                       onchange="window.h3dBgSetNoteNamesHideRetuned && window.h3dBgSetNoteNamesHideRetuned(this.checked)"
+                       class="accent-accent">
+                Hide names on retuned strings
+            </label>
+            <p class="text-[10px] text-gray-500">
+                No names on strings the song tunes differently from the rest, like
+                the low string in Drop D, where the frets no longer match the names
+                you know. Songs tuned all the same way (Eb Standard) keep every name.
+            </p>
         </div>
     </div>
 
@@ -1000,7 +1011,7 @@
          no-selection / NaN state. -->
     <script>
         (function () {
-            const DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, noteNamesVisible: false, noteNamesLongOnly: false, noteNamesMinSustain: 0.2, noteNamesStrings: 'lowE,A,D,G,B,highE,low7,low8' };
+            const DEFAULTS = { style: 'particles', intensity: 0.5, reactive: true, palette: 'default', bgTheme: 'default', hwTheme: 'default', showFretOnNote: true, fretNumberGhostScope: 'chords', cameraSmoothing: 0.5, zoomSmoothing: 0.5, tiltSmoothing: 0.5, cameraLockLow: false, cameraLockZoom: 0.5, cameraMode: 'lookahead', nutHeadstockVisible: true, tuningLabelsVisible: true, nutColor: '#f5f3f0', headstockColor: '#d4b48a', textSize: 0.5, vibrancy: 0.85, glow: 0.25, customImageDataUrl: '', customImageName: '', customVideoName: '', chordDiagramVisible: true, chordDiagramSize: 0.5, chordDiagramPosition: 'tl', fretColumnMarkerCadence: 1, projectionVisible: true, inlayLabelsVisible: false, sectionLabelsOnHighway: false, sectionHudVisible: false, sectionHudPosition: 'tr', sectionHudSize: 0.5, toneHudVisible: false, toneHudPosition: 'tl', toneHudSize: 0.5, fpsVisible: false, fretDividersVisible: true, slideArrowApproachVisible: true, slideArrowNeckVisible: true, slideArrowChainPreviewVisible: true, noteNamesVisible: false, noteNamesLongOnly: false, noteNamesMinSustain: 0.2, noteNamesStrings: 'lowE,A,D,G,B,highE,low7,low8', noteNamesHideRetuned: true };
             const VALID_STYLES = new Set(['off', 'particles', 'silhouettes', 'lights', 'geometric', 'butterchurn', 'image', 'video']);
             // Scene color themes — the single id+label source for BOTH the
             // Background and Highway dropdowns AND the validator below. The
@@ -1158,6 +1169,7 @@
             let storedSlideArrowChainPreviewVisible = null;
             let storedNoteNamesVisible = null;
             let storedNoteNamesLongOnly = null, storedNoteNamesMinSustain = null, storedNoteNamesStrings = null;
+            let storedNoteNamesHideRetuned = null;
             try {
                 storedStyle = localStorage.getItem('h3d_bg_style');
                 storedBgTheme = localStorage.getItem('h3d_bg_bgTheme');
@@ -1201,6 +1213,7 @@
                 storedNoteNamesLongOnly = localStorage.getItem('h3d_bg_noteNamesLongOnly');
                 storedNoteNamesMinSustain = localStorage.getItem('h3d_bg_noteNamesMinSustain');
                 storedNoteNamesStrings = localStorage.getItem('h3d_bg_noteNamesStrings');
+                storedNoteNamesHideRetuned = localStorage.getItem('h3d_bg_noteNamesHideRetuned');
                 storedCustomImageDataUrl = localStorage.getItem('h3d_bg_customImageDataUrl');
                 storedCustomImageName = localStorage.getItem('h3d_bg_customImageName');
                 storedCustomVideoName = localStorage.getItem('h3d_bg_customVideoName');
@@ -1283,6 +1296,7 @@
             const slideArrowChainPreviewVisible = coerceBool(storedSlideArrowChainPreviewVisible, DEFAULTS.slideArrowChainPreviewVisible);
             const noteNamesVisible = coerceBool(storedNoteNamesVisible, DEFAULTS.noteNamesVisible);
             const noteNamesLongOnly = coerceBool(storedNoteNamesLongOnly, DEFAULTS.noteNamesLongOnly);
+            const noteNamesHideRetuned = coerceBool(storedNoteNamesHideRetuned, DEFAULTS.noteNamesHideRetuned);
             const noteNamesMinSustain = (function (v) {
                 const n = parseFloat(v);
                 return Number.isFinite(n) ? Math.max(0.05, Math.min(2, n)) : DEFAULTS.noteNamesMinSustain;
@@ -1427,6 +1441,8 @@
             const nnMin  = document.getElementById('h3d-note-names-min-sustain');
             if (nnLong) nnLong.checked = noteNamesLongOnly;
             if (nnMin)  nnMin.value    = noteNamesMinSustain.toFixed(2);
+            const nnRetuned = document.getElementById('h3d-note-names-hide-retuned');
+            if (nnRetuned) nnRetuned.checked = noteNamesHideRetuned;
 
             // Note-name options only matter while names are on.
             function syncH3dNoteNamesOptionsUi() {

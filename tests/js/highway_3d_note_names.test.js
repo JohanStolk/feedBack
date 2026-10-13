@@ -29,9 +29,10 @@ const helpers = new Function(
     slice(/const _BASE_OPEN_MIDI_BASS4 = /, '\n    }\n') // through _baseOpenStringMidis
     + '\n' + slice(/const _NOTE_NAMES_COMMON = /, ';\n')
     + '\n' + slice(/function _noteNameForFret\(/, '\n    }\n')
-    + '\nreturn { _baseOpenStringMidis, _noteNameForFret, _NOTE_NAMES_COMMON };',
+    + '\n' + slice(/function _noteNameRetunedStrings\(/, '\n    }\n')
+    + '\nreturn { _baseOpenStringMidis, _noteNameForFret, _NOTE_NAMES_COMMON, _noteNameRetunedStrings };',
 )();
-const { _baseOpenStringMidis, _noteNameForFret, _NOTE_NAMES_COMMON } = helpers;
+const { _baseOpenStringMidis, _noteNameForFret, _NOTE_NAMES_COMMON, _noteNameRetunedStrings } = helpers;
 
 const guitar = _baseOpenStringMidis(6, 'Lead');   // E A D G B E
 const bass = _baseOpenStringMidis(4, 'Bass');     // E A D G
@@ -132,7 +133,7 @@ test('without core\'s colors API the filter names every string', () => {
     assert.equal(slots(throwing)._noteNameSlotKeysForChart(6, false), null);
     // null slots → every string on, unless the selection is empty (then none).
     assert.match(src, /new Set\(String\(noteNamesStrings \|\| ''\)\.split\(','\)\.filter\(Boolean\)\)/);
-    assert.match(src, /_noteNameStringOn\.push\(slots \? enabled\.has\(slots\[i\]\) : enabled\.size > 0\);/);
+    assert.match(src, /_noteNameStringOn\.push\(\(slots \? enabled\.has\(slots\[i\]\) : enabled\.size > 0\)\n/);
 });
 
 test('the setting uses exactly core\'s named string slots', () => {
@@ -155,7 +156,7 @@ test('long-notes-only and string filters gate the label', () => {
     }
     assert.match(src, /window\.h3dBgSetNoteNamesStrings = /);
     // The per-string flags are recomputed when the string selection changes.
-    assert.match(src, /\+ '\|' \+ noteNamesStrings;/);
+    assert.match(src, /\+ '\|' \+ noteNamesStrings \+ '\|' \+ noteNamesHideRetuned;/);
 });
 
 test('note names stay below the bloom threshold so they render crisp, not hazy', () => {
@@ -196,4 +197,34 @@ test('settings page has the checkbox and mirrors the default', () => {
     assert.match(html, /id="h3d-note-names-strings"/);
     // settings.html's DEFAULTS mirror must match the renderer's defaults.
     assert.match(html, /noteNamesLongOnly: false, noteNamesMinSustain: 0\.2, noteNamesStrings: 'lowE,A,D,G,B,highE,low7,low8'/);
+});
+
+test('retuned strings: only strings tuned away from the rest', () => {
+    assert.deepEqual(_noteNameRetunedStrings([-2, 0, 0, 0, 0, 0], 4), [true, false, false, false]);   // Drop D bass
+    assert.deepEqual(_noteNameRetunedStrings([-2, 0, 0, 0, 0, 0], 6), [true, false, false, false, false, false]);
+    assert.deepEqual(_noteNameRetunedStrings([-1, -1, -1, -1, 0, 0], 4), [false, false, false, false]); // Eb standard
+    assert.deepEqual(_noteNameRetunedStrings([0, 0, 0, 0, 0, 0], 6), [false, false, false, false, false, false]);
+    assert.deepEqual(_noteNameRetunedStrings([-4, -2, -2, -2, -2, -2], 6), [true, false, false, false, false, false]); // Drop C
+    assert.deepEqual(_noteNameRetunedStrings([-2, 0, 0, -1, -2, -2], 6), [false, true, true, true, false, false]);
+    // A tie goes to the higher strings: 2-2 split keeps the top pair's names.
+    assert.deepEqual(_noteNameRetunedStrings([-2, -2, 0, 0], 4), [true, true, false, false]);
+    // Missing/non-numeric offsets count as standard.
+    assert.deepEqual(_noteNameRetunedStrings([-2], 4), [true, false, false, false]);
+});
+
+test('the hide-retuned option is wired like the other note-name settings', () => {
+    assert.match(src, /noteNamesStrings: NOTE_NAME_SLOT_KEYS\.join\(','\), noteNamesHideRetuned: true,/);
+    assert.match(src, /'noteNamesHideRetuned', 'sparks',/);
+    for (const k of ['noteNamesHideRetuned']) {
+        assert.match(src, new RegExp(`changedKey === '${k}'`));
+        assert.match(src, new RegExp(`${k} = _bgReadSetting\\(panelKey, '${k}'\\)`));
+        assert.match(src, new RegExp(`window\\.h3dBgSetNoteNames${k.slice(9)} = \\(v\\) => _bgWriteGlobal\\('${k}', !!v\\)`));
+    }
+    assert.match(src, /const retuned = noteNamesHideRetuned \? _noteNameRetunedStrings\(tuning, nStr\) : null;/);
+    assert.match(src, /&& !\(retuned && retuned\[i\]\)\);/);
+
+    const html = fs.readFileSync(SETTINGS_HTML, 'utf8');
+    assert.match(html, /noteNamesHideRetuned: true \};/);
+    assert.match(html, /id="h3d-note-names-hide-retuned"[\s\S]{0,200}h3dBgSetNoteNamesHideRetuned\(this\.checked\)/);
+    assert.match(html, /localStorage\.getItem\('h3d_bg_noteNamesHideRetuned'\)/);
 });
