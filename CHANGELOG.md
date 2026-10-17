@@ -336,6 +336,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   3D Highway settings page still called them through inline
   `onclick="window.hwc…()"` handlers that no longer existed. Core now handles
   them with one delegated listener keyed by `data-hwc-action`.
+- **6-string bass uses its real standard tuning (B E A D G C).** Several places
+  fell back to guitar pitches (E A D G B E) for a 6-string bass, although the GP
+  importer writes its tuning offsets against B E A D G C: scale degrees on the
+  highway stream, the in-song tuning targets, and the tuner's target notes. The
+  Highway String Colors also mapped it as Low F#, Low B, Low E, A, D, G; it is now
+  Low B, Low E, A, D, G, with the high C on the B slot.
 - **Count-in follows the song's meter and its pickup measure.** The count-in
   (loop wrap, section practice, and the "Countdown before song" setting) always
   clicked exactly four beats, so a 3/4 song was counted in 4/4, and a song
