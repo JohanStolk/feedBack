@@ -342,6 +342,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   highway stream, the in-song tuning targets, and the tuner's target notes. The
   Highway String Colors also mapped it as Low F#, Low B, Low E, A, D, G; it is now
   Low B, Low E, A, D, G, with the high C on the B slot.
+- **Player: the Plugin controls popover scrolls instead of running off-screen.**
+  With many plugins installed (16+ controls) the vertically centred popover
+  grew past the window, hiding its first and last controls. It is now capped
+  at the window height and scrolls.
 - **Count-in follows the song's meter and its pickup measure.** The count-in
   (loop wrap, section practice, and the "Countdown before song" setting) always
   clicked exactly four beats, so a 3/4 song was counted in 4/4, and a song
