@@ -667,6 +667,10 @@ html[data-scoreboard="off"] #v3-live-performance-hud { display: none !important;
     transform: translateY(-50%);
     min-width: 230px;
     max-width: 340px;
+    /* Many plugin controls (or a long settings list) must not grow past the
+       window: centred, an overflowing popover hides its top and bottom rows. */
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
     pointer-events: auto;
     background: rgba(15, 23, 42, .96);
     border: 1px solid rgba(51, 65, 85, .6);
