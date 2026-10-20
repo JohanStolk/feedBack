@@ -667,10 +667,6 @@ html[data-scoreboard="off"] #v3-live-performance-hud { display: none !important;
     transform: translateY(-50%);
     min-width: 230px;
     max-width: 340px;
-    /* Many plugin controls (or a long settings list) must not grow past the
-       window: centred, an overflowing popover hides its top and bottom rows. */
-    max-height: calc(100vh - 2rem);
-    overflow-y: auto;
     pointer-events: auto;
     background: rgba(15, 23, 42, .96);
     border: 1px solid rgba(51, 65, 85, .6);
@@ -683,6 +679,14 @@ html[data-scoreboard="off"] #v3-live-performance-hud { display: none !important;
     z-index: 40;
 }
 .v3-rail-pop.hidden { display: none; }
+/* Many plugin controls must not grow past the window: the popover is centred,
+   so an overflowing one hides its first and last controls. Only this popover:
+   overflow-y on the others (the mixer's wide fader row) would add scrollbars. */
+#v3-rail-pop-plugins {
+    max-height: calc(100vh - 2rem);
+    overflow-x: hidden;
+    overflow-y: auto;
+}
 .v3-pop-row {
     display: flex;
     align-items: center;
