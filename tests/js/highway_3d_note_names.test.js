@@ -143,7 +143,7 @@ test('the setting uses exactly core\'s named string slots', () => {
 });
 
 test('long-notes-only and string filters gate the label', () => {
-    assert.match(src, /&& _noteNameStringOn\[s\]\n\s*&& \(!noteNamesLongOnly \|\| \(n\.sus \|\| 0\) >= noteNamesMinSustain\)\) \{/);
+    assert.match(src, /&& _noteNameStringOn\[s\]\n\s*&& \(!noteNamesLongOnly \|\| \(n\.sus \|\| 0\) >= noteNamesMinSustain \|\| _noteNameRuns\.has\(n\)\)\) \{/);
     assert.match(src, /noteNamesLongOnly: false, noteNamesMinSustain: 0\.2, noteNamesStrings: NOTE_NAME_SLOT_KEYS\.join\(','\)/);
     assert.match(src, /'noteNamesVisible', 'noteNamesLongOnly',/);
     // Minimum length is clamped to 0.05..2 s; unknown string keys are dropped.
@@ -196,4 +196,51 @@ test('settings page has the checkbox and mirrors the default', () => {
     assert.match(html, /id="h3d-note-names-strings"/);
     // settings.html's DEFAULTS mirror must match the renderer's defaults.
     assert.match(html, /noteNamesLongOnly: false, noteNamesMinSustain: 0\.2, noteNamesStrings: 'lowE,A,D,G,B,highE,low7,low8'/);
+});
+
+// "Only notes held at least N s": runs of one repeated note count as long.
+const runs = new Function(
+    slice(/const NOTE_NAME_RUN_GAP = /, ';\n')
+    + '\n' + slice(/function _noteNameRepeatedRuns\(/, '\n    }\n')
+    + '\nreturn { NOTE_NAME_RUN_GAP, _noteNameRepeatedRuns };',
+)();
+
+test('a gallop on one note counts as long; each note in it gets a name', () => {
+    // Heaven-and-Hell style: F# on the low E (fret 2), 16ths at ~0.11 s, 0.05 s each.
+    const gallop = [0, 0.11, 0.22, 0.33].map((t) => ({ t, s: 0, f: 2, sus: 0 }));
+    const set = runs._noteNameRepeatedRuns(gallop, 0.2, runs.NOTE_NAME_RUN_GAP);
+    assert.equal(set.size, 4);
+    for (const n of gallop) assert.ok(set.has(n));
+});
+
+test('a lone short note, or a run shorter than the minimum, stays unnamed', () => {
+    const lone = [{ t: 0, s: 0, f: 2, sus: 0 }, { t: 0.1, s: 0, f: 3, sus: 0 }, { t: 0.2, s: 1, f: 3, sus: 0 }];
+    assert.equal(runs._noteNameRepeatedRuns(lone, 0.2, 0.5).size, 0);
+    const pair = [{ t: 0, s: 0, f: 2, sus: 0 }, { t: 0.1, s: 0, f: 2, sus: 0.05 }];   // lasts 0.15 s
+    assert.equal(runs._noteNameRepeatedRuns(pair, 0.2, 0.5).size, 0);
+    assert.equal(runs._noteNameRepeatedRuns(pair, 0.15, 0.5).size, 2, 'long enough at 0.15 s');
+});
+
+test('another note, another string or a rest ends the run', () => {
+    const a = { t: 0, s: 0, f: 2 }, b = { t: 0.1, s: 0, f: 2 };
+    const other = { t: 0.2, s: 0, f: 4 };                   // different fret breaks it
+    const c = { t: 0.3, s: 0, f: 2 }, d = { t: 1.0, s: 0, f: 2 }, e = { t: 1.1, s: 0, f: 2 };
+    const set = runs._noteNameRepeatedRuns([a, b, other, c, d, e], 0.1, 0.5);
+    assert.ok(set.has(a) && set.has(b), 'first pair (0.1 s) qualifies at 0.1');
+    assert.ok(!set.has(other));
+    assert.ok(!set.has(c), 'c is alone: d comes 0.7 s later (a rest)');
+    assert.ok(set.has(d) && set.has(e));
+    const strings = [{ t: 0, s: 0, f: 2 }, { t: 0.1, s: 1, f: 2 }, { t: 0.2, s: 0, f: 2 }];
+    assert.equal(runs._noteNameRepeatedRuns(strings, 0.05, 0.5).size, 0, 'same fret, other string: not a run');
+});
+
+test('garbage input gives no runs', () => {
+    assert.equal(runs._noteNameRepeatedRuns(null, 0.2).size, 0);
+    assert.equal(runs._noteNameRepeatedRuns([{ t: 0, s: 0, f: 1 }], 0.2).size, 0);
+    assert.equal(runs._noteNameRepeatedRuns([{ t: NaN, s: 0, f: 1 }, { t: 0.1, s: 0, f: 1 }], 0).size, 0);
+});
+
+test('the filter consults the runs, recomputed per chart, not per frame', () => {
+    assert.match(src, /\(!noteNamesLongOnly \|\| \(n\.sus \|\| 0\) >= noteNamesMinSustain \|\| _noteNameRuns\.has\(n\)\)/);
+    assert.match(src, /bundle\.notes !== _noteNameRunsFor \|\| noteNamesMinSustain !== _noteNameRunsMin/);
 });

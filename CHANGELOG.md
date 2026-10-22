@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the common spelling for sharps and flats (C#, Eb, F#, Ab, Bb) with no octave
   number, and sits above any bend or hammer-on marker. Chords keep their chord
   name instead. Two filters reduce clutter while learning: **only notes held
-  at least N seconds** (default 0.2 s, off by default), and **per-string
+  at least N seconds** (default 0.2 s, off by default; a fast run of one
+  repeated note, like a gallop on the same fret, counts as held once the run
+  lasts that long), and **per-string
   checkboxes** (e.g. only Low E) using the same named strings and colours as
   Highway String Colors, so they work the same on 4/5-string bass and 6/7/8-string
   guitar and in alternate tunings. A 6-string bass now uses its real standard
