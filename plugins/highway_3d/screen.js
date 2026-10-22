@@ -897,6 +897,42 @@
         return !!(vt && vt.active);
     }
 
+    // Longest gap between onsets that still counts as playing the same note
+    // again ("in a row"): a gallop or eighth notes, not the same note after a rest.
+    const NOTE_NAME_RUN_GAP = 0.5;
+
+    /**
+     * Notes the "only notes held at least N seconds" filter names although each
+     * is short: runs of the same note (same string and fret, back to back, onsets
+     * at most `maxGap` apart) lasting at least `minSustain` from the first onset
+     * to the end of the last note. A fast gallop on one note (Heaven and Hell)
+     * keeps its name; a lone short note doesn't. `notes` sorted by .t, as
+     * bundle.notes is. Returns a Set of the qualifying note objects.
+     */
+    function _noteNameRepeatedRuns(notes, minSustain, maxGap) {
+        const out = new Set();
+        if (!Array.isArray(notes) || notes.length < 2) return out;
+        const gap = Number.isFinite(maxGap) ? maxGap : NOTE_NAME_RUN_GAP;
+        const min = Number.isFinite(minSustain) ? minSustain : 0;
+        let start = 0;
+        for (let i = 1; i <= notes.length; i++) {
+            const prev = notes[i - 1], n = notes[i];
+            const again = !!n && !!prev && n.s === prev.s && n.f === prev.f
+                && Number.isFinite(n.t) && Number.isFinite(prev.t)
+                && n.t >= prev.t && n.t - prev.t <= gap;
+            if (again) continue;
+            const end = i - 1;
+            if (end > start) {
+                const first = notes[start], last = notes[end];
+                if (last.t + (last.sus || 0) - first.t >= min) {
+                    for (let k = start; k <= end; k++) out.add(notes[k]);
+                }
+            }
+            start = i;
+        }
+        return out;
+    }
+
     // Named strings for the note-name string filter: core's "Highway String
     // Colors" slot keys, so a string keeps its name and colour across
     // instruments and tunings (drop D's low string is still lowE; a 5-string
@@ -5009,6 +5045,9 @@
         const _noteNameOpenMidi = [];
         const _noteNameStringOn = [];   // per string index: name this string?
         let _noteNameCapo = 0, _noteNameKey = '';
+        // "Only longer notes": runs of one repeated note that count as long
+        // (_noteNameRepeatedRuns), per chart and minimum length.
+        let _noteNameRuns = new Set(), _noteNameRunsFor = null, _noteNameRunsMin = -1;
         let noteNamesLongOnly = BG_DEFAULTS.noteNamesLongOnly;     // only notes held >= min
         let noteNamesMinSustain = BG_DEFAULTS.noteNamesMinSustain; // seconds
         let noteNamesStrings = BG_DEFAULTS.noteNamesStrings;       // enabled slot keys (CSV)
@@ -11528,6 +11567,14 @@
             _drawAnchors = anchors ?? null;
             _drawTeachingMarks = !!bundle.teachingMarksVisible;
             if (noteNamesVisible) _refreshNoteNameTuning(bundle);
+            if (noteNamesVisible && noteNamesLongOnly
+                && (bundle.notes !== _noteNameRunsFor || noteNamesMinSustain !== _noteNameRunsMin)) {
+                // Chart-static: recomputed only when the notes array (song,
+                // arrangement, difficulty) or the minimum length changes.
+                _noteNameRuns = _noteNameRepeatedRuns(bundle.notes, noteNamesMinSustain, NOTE_NAME_RUN_GAP);
+                _noteNameRunsFor = bundle.notes;
+                _noteNameRunsMin = noteNamesMinSustain;
+            }
             // Default on: only an explicit false (older bundles omit the flag) hides fg.
             _showFingerHints = bundle.fingerHintsVisible !== false;
 
@@ -15241,7 +15288,7 @@
                 // fret the gliding gem is over, not the starting fret.
                 if (noteNamesVisible && !fromChord && _noteNameOpenMidi[s] !== undefined
                     && _noteNameStringOn[s]
-                    && (!noteNamesLongOnly || (n.sus || 0) >= noteNamesMinSustain)) {
+                    && (!noteNamesLongOnly || (n.sus || 0) >= noteNamesMinSustain || _noteNameRuns.has(n))) {
                     const nameAlpha = dt >= 0
                         ? Math.min(1.0, (AHEAD - dt) / 0.35)
                         : (sustained ? 1.0 : 0);
