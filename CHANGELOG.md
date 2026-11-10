@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Profile: rank your best scores by accuracy or points.** "Your best scores" now
+  has an Accuracy / Points toggle and shows 10 songs. Points add up per note, so
+  that list is led by long songs; Accuracy shows the songs you play best (songs
+  under a minute, such as diagnostic clips, are left out). The choice is remembered.
+  `GET /api/stats/top` takes `sort=accuracy`; the default stays `score`.
 - **3D Highway: note names above notes (optional).** A new Settings →
   3D Highway — Notes toggle, "Show note names above notes" (off by default),
   shows each single note's name above its gem as it comes down the highway
