@@ -64,7 +64,8 @@
         artist: '', album: '',
         grouping: true,     // one card per song (multi-chart grouping); persisted
 
-        filters: { arr_has: [], arr_lacks: [], stem_has: [], stem_lacks: [], lyrics: '', tunings: [], mastery: [], match: [], genre: [], rating: '', tuningMatch: 'exact' },
+        filters: { arr_has: [], arr_lacks: [], stem_has: [], stem_lacks: [], lyrics: '', tunings: [], mastery: [], match: [], genre: [], rating: '', tags: [], tuningMatch: 'exact' },
+        tagList: [],
         page: 0, total: 0, loading: false, built: false, accuracy: {}, tuningNames: [], genres: [],
         artistCatalog: [], renderedHash: '',
         scrollBound: false,
@@ -123,7 +124,7 @@
         const f = state.filters;
         return f.arr_has.length + f.arr_lacks.length + f.stem_has.length + f.stem_lacks.length +
             (f.lyrics ? 1 : 0) + (f.tuningMatch === 'playable' ? 1 : f.tunings.length) + (f.mastery ? f.mastery.length : 0) +
-            (f.match ? f.match.length : 0) + (f.genre ? f.genre.length : 0) + (f.rating ? 1 : 0) +
+            (f.match ? f.match.length : 0) + (f.genre ? f.genre.length : 0) + (f.rating ? 1 : 0) + (f.tags ? f.tags.length : 0) +
             (state.artist ? 1 : 0) + (state.album ? 1 : 0);
     }
 
@@ -150,6 +151,7 @@
                 match: [...(f.match || [])].sort(),
                 genre: [...(f.genre || [])].sort(),
                 rating: f.rating || '',
+                tags: [...(f.tags || [])].sort(),
             },
         });
     }
@@ -180,7 +182,7 @@
                 arr_has: arr(f.arr_has), arr_lacks: arr(f.arr_lacks),
                 stem_has: arr(f.stem_has), stem_lacks: arr(f.stem_lacks),
                 lyrics: f.lyrics || '', tunings: arr(f.tunings),
-                mastery: [], match: [], genre: [], rating: '',
+                mastery: [], match: [], genre: [], rating: '', tags: [],
             };
         }
     }
@@ -296,6 +298,7 @@
         if (f.match && f.match.length) p.set('match', f.match.join(','));
         if (f.genre && f.genre.length) p.set('genre', f.genre.join(','));
         if (f.rating) p.set('rating_min', f.rating);
+        if (f.tags && f.tags.length) p.set('tags', f.tags.join(','));
         Object.entries(extra || {}).forEach(([k, v]) => p.set(k, v));
         return p;
     }
@@ -3016,6 +3019,8 @@
             // facet for the enrichment layer. Session-only, like Progress.
             section('Match', [['review', 'To review'], ['matched', 'Matched'], ['unmatched', 'Unmatched'], ['pending', 'Not scanned']].map((it) => '<button data-match="' + it[0] + '" class="px-2 py-1 rounded-md text-xs border ' + (f.match.includes(it[0]) ? 'bg-fb-primary text-white border-fb-primary' : 'bg-gray-800/50 text-fb-textDim border-gray-700') + '">' + it[1] + '</button>').join('')) +
             // Genre facet — dynamic list from /api/library/genres (primary genre).
+            // Your personal tags (Details → Tags), any-of; count = songs tagged.
+            (state.tagList && state.tagList.length ? section('Tags', state.tagList.map((tg) => '<button data-tag-filter="' + esc(tg.tag) + '" class="px-2 py-1 rounded-md text-xs border ' + ((f.tags || []).includes(tg.tag) ? 'bg-fb-primary text-white border-fb-primary' : 'bg-gray-800/50 text-fb-textDim border-gray-700') + '">' + esc(tg.tag) + ' <span class="opacity-60">' + esc(tg.count) + '</span></button>').join('')) : '') +
             (state.genres && state.genres.length ? section('Genre', state.genres.map((g) => '<button data-genre="' + esc(g) + '" class="px-2 py-1 rounded-md text-xs border ' + (f.genre.includes(g) ? 'bg-fb-primary text-white border-fb-primary' : 'bg-gray-800/50 text-fb-textDim border-gray-700') + '">' + esc(g) + '</button>').join('')) : '') +
             // The facet header NAMES the perspective. Silent instrument-following
             // is the original bug in a new place: the user must be able to tell
@@ -3117,11 +3122,12 @@
         });
         d.querySelectorAll('[data-match]').forEach((b) => b.addEventListener('click', () => { const v = b.getAttribute('data-match'); const i = f.match.indexOf(v); if (i >= 0) f.match.splice(i, 1); else f.match.push(v); renderDrawer(); }));
         d.querySelectorAll('[data-genre]').forEach((b) => b.addEventListener('click', () => { const v = b.getAttribute('data-genre'); const i = f.genre.indexOf(v); if (i >= 0) f.genre.splice(i, 1); else f.genre.push(v); renderDrawer(); }));
+        d.querySelectorAll('[data-tag-filter]').forEach((b) => b.addEventListener('click', () => { if (!f.tags) f.tags = []; const v = b.getAttribute('data-tag-filter'); const i = f.tags.indexOf(v); if (i >= 0) f.tags.splice(i, 1); else f.tags.push(v); renderDrawer(); }));
         d.querySelector('[data-drawer-save]')?.addEventListener('click', saveCurrentAsCollection);
         d.querySelector('[data-drawer-tidy]')?.addEventListener('click', openArtistTidyUp);
         d.querySelector('[data-drawer-close]')?.addEventListener('click', closeDrawer);
         d.querySelector('[data-drawer-clear]')?.addEventListener('click', async () => {
-            state.filters = { arr_has: [], arr_lacks: [], stem_has: [], stem_lacks: [], lyrics: '', tunings: [], mastery: [], match: [], genre: [], rating: '', tuningMatch: 'exact' };
+            state.filters = { arr_has: [], arr_lacks: [], stem_has: [], stem_lacks: [], lyrics: '', tunings: [], mastery: [], match: [], genre: [], rating: '', tags: [], tuningMatch: 'exact' };
             state.artist = '';
             state.album = '';
             renderDrawer();
@@ -3139,7 +3145,11 @@
     function section(label, inner) {
         return '<div><div class="text-xs font-semibold uppercase tracking-wider text-fb-textDim mb-2">' + label + '</div><div class="flex flex-wrap gap-1">' + inner + '</div></div>';
     }
-    function openDrawer() { renderDrawer(); document.getElementById('v3-songs-drawer')?.classList.remove('translate-x-full'); document.getElementById('v3-songs-overlay')?.classList.remove('hidden'); }
+    function openDrawer() {
+        renderDrawer(); document.getElementById('v3-songs-drawer')?.classList.remove('translate-x-full'); document.getElementById('v3-songs-overlay')?.classList.remove('hidden');
+        // Tags change whenever a song is (un)tagged: refresh the list on open.
+        jget('/api/tags').then((t) => { state.tagList = (t && t.tags) || []; renderDrawer(); }).catch(() => { /* keep the old list */ });
+    }
     function closeDrawer() { document.getElementById('v3-songs-drawer')?.classList.add('translate-x-full'); document.getElementById('v3-songs-overlay')?.classList.add('hidden'); updateFilterBadge(); }
     function updateFilterBadge() { const b = document.getElementById('v3-songs-filter-count'); if (b) { const n = activeFilterCount(); b.textContent = n; b.classList.toggle('hidden', n === 0); } }
 
@@ -3724,6 +3734,7 @@
         state.tuningNames = (tn && tn.tunings) || [];
         _lastRenderInstrument = libInstrument();
         try { const _g = await jget('/api/library/genres?provider=' + enc(state.provider)); state.genres = (_g && _g.genres) || []; } catch (e) { state.genres = []; }
+        try { const _t = await jget('/api/tags'); state.tagList = (_t && _t.tags) || []; } catch (e) { state.tagList = []; }
 
         const opt = (arr, sel) => arr.map(([v, l]) => '<option value="' + esc(v) + '"' + (v === sel ? ' selected' : '') + '>' + esc(l) + '</option>').join('');
         const provOpts = providers.map((p) => '<option value="' + esc(p.id) + '"' + (p.id === state.provider ? ' selected' : '') + '>' + esc(p.label || p.id) + '</option>').join('');
