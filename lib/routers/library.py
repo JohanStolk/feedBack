@@ -235,6 +235,7 @@ async def list_library(q: str = "", page: int = 0, size: int = 24, sort: str = "
                        stems_has: str = "", stems_lacks: str = "",
                        has_lyrics: str = "", tunings: str = "", provider: str = "local",
                        mastery: str = "", tags: str = "", user_difficulty: str = "",
+                       rating_min: int = 0,
                        match: str = "", genre: str = "", after: str = "", group: int = 0,
                        naming_mode: str = "legacy", instrument: str = "",
                        tuning_match: str = "", playable_offsets: str = "",
@@ -275,6 +276,7 @@ async def list_library(q: str = "", page: int = 0, size: int = 24, sort: str = "
         mastery=_split_csv(mastery),
         tags_has=_split_csv(tags),
         user_difficulty_in=_split_csv(user_difficulty),
+        rating_min=(rating_min if 1 <= rating_min <= 5 else None),
         match_states=_split_csv(match),
         genre=_split_csv(genre),
         **_library_filter_args(

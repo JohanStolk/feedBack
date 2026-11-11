@@ -485,6 +485,30 @@ def put_song_user_meta(filename: str, data: dict):
     return appstate.meta_db.get_song_user_meta(key)
 
 
+@router.get("/api/song/{filename:path}/rating")
+def get_song_rating(filename: str):
+    """{rating: 1–5 | null}: the personal star rating (how much you like it)."""
+    return {"rating": appstate.meta_db.get_song_rating(
+        appstate.meta_db._canonical_song_filename(filename))}
+
+
+@router.put("/api/song/{filename:path}/rating")
+def put_song_rating(filename: str, data: dict):
+    """Set the star rating: {"rating": 1–5}, or null/0 to clear."""
+    v = data.get("rating", "__absent__")
+    if v == "__absent__":
+        return JSONResponse({"error": "rating is required (1–5, or null to clear)"}, 400)
+    if v in (None, 0, ""):
+        rating = None
+    elif isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 5:
+        return JSONResponse({"error": "rating must be an integer 1–5 or null"}, 400)
+    else:
+        rating = v
+    key = appstate.meta_db._canonical_song_filename(filename)
+    appstate.meta_db.set_song_rating(key, rating)
+    return {"rating": appstate.meta_db.get_song_rating(key)}
+
+
 # Catalog fields the Fix-metadata popup may override/lock — the intersection of
 # "displayable identity" and "safe to correct locally". Guitar/practice facts
 # and personal fields are never overrides.

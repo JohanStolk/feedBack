@@ -577,6 +577,16 @@ class MetadataDB:
                 updated_at TEXT
             )
         """)
+        # Personal 1–5 star rating: how much you LIKE a song (Rock Band 3 style),
+        # separate from the 1–5 difficulty above and from the ♥ favourite. Own
+        # table for the same never-clobber reason. Additive + idempotent.
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS song_rating (
+                filename TEXT PRIMARY KEY,
+                rating INTEGER NOT NULL,   -- 1..5; no row = unrated
+                updated_at TEXT
+            )
+        """)
         # Free-form personal practice tags ("warm-ups", "riffs to nail") — an
         # intent practice-set primitive (Play-all-over-a-tag comes later). Tags
         # are normalized lowercase on write so "Rock"/"rock" don't split. Peer
@@ -1132,6 +1142,39 @@ class MetadataDB:
             self.conn.commit()
         return self.get_song_user_meta(filename)
 
+    # ── Personal star rating (1–5, how much you like a song) ────────────────
+    def get_song_rating(self, filename: str):
+        row = self.conn.execute(
+            "SELECT rating FROM song_rating WHERE filename = ?", (filename,)).fetchone()
+        return row[0] if row else None
+
+    def set_song_rating(self, filename: str, rating) -> None:
+        """Set 1–5, or None to clear (the row is dropped)."""
+        with self._lock:
+            if rating is None:
+                self.conn.execute("DELETE FROM song_rating WHERE filename = ?", (filename,))
+            else:
+                self.conn.execute(
+                    "INSERT INTO song_rating (filename, rating, updated_at) "
+                    "VALUES (?, ?, datetime('now')) ON CONFLICT(filename) DO UPDATE SET "
+                    "rating = excluded.rating, updated_at = excluded.updated_at",
+                    (filename, int(rating)))
+            self.conn.commit()
+
+    def rating_map(self, filenames) -> dict:
+        """Batch {filename: rating} for a page of rows (rated songs only)."""
+        fns = list(filenames)
+        out: dict = {}
+        for i in range(0, len(fns), 400):
+            chunk = fns[i:i + 400]
+            if not chunk:
+                break
+            ph = ",".join("?" * len(chunk))
+            out.update(self.conn.execute(
+                f"SELECT filename, rating FROM song_rating WHERE filename IN ({ph})",
+                chunk).fetchall())
+        return out
+
     # ── Per-field metadata overrides + locks (Fix-metadata popup) ─────────────
     def get_song_overrides(self, filename: str) -> dict:
         """{field: {"value": str|None, "locked": bool}} for one song."""
@@ -1352,6 +1395,7 @@ class MetadataDB:
         """Drop all personal rows for a deleted song. Called by delete_song
         INSIDE the caller's `meta_db._lock` — must not re-acquire the lock."""
         self.conn.execute("DELETE FROM song_user_meta WHERE filename = ?", (filename,))
+        self.conn.execute("DELETE FROM song_rating WHERE filename = ?", (filename,))
         self.conn.execute("DELETE FROM song_tags WHERE filename = ?", (filename,))
         self.conn.execute("DELETE FROM song_field_override WHERE filename = ?", (filename,))
 
@@ -3565,6 +3609,7 @@ class MetadataDB:
                      mastery: list[str] | None = None,
                      tags_has: list[str] | None = None,
                      user_difficulty_in: list[str] | None = None,
+                     rating_min: int | None = None,
                      match_states: list[str] | None = None,
                      genre: list[str] | None = None,
                      naming_mode: str = "legacy",
@@ -3640,6 +3685,10 @@ class MetadataDB:
             where += (" AND filename IN (SELECT filename FROM song_user_meta "
                       f"WHERE user_difficulty IN ({ph}))")
             params += _diffs
+        # Personal star rating: "N stars or more" (song_rating).
+        if rating_min is not None and 1 <= int(rating_min) <= 5:
+            where += " AND filename IN (SELECT filename FROM song_rating WHERE rating >= ?)"
+            params.append(int(rating_min))
         # Match facet (P8) = the song's enrichment lifecycle state, from the
         # separate song_enrichment table (same EXISTS idiom as mastery above).
         # 'matched' folds in 'manual' (a user pin IS a match); 'pending' means
@@ -4123,6 +4172,7 @@ class MetadataDB:
                    mastery: list[str] | None = None,
                    tags_has: list[str] | None = None,
                    user_difficulty_in: list[str] | None = None,
+                   rating_min: int | None = None,
                    match_states: list[str] | None = None,
                    genre: list[str] | None = None,
                    after: str | None = None,
@@ -4157,7 +4207,7 @@ class MetadataDB:
             stems_has=stems_has, stems_lacks=stems_lacks,
             has_lyrics=has_lyrics, tunings=tunings, mastery=mastery,
             tags_has=tags_has, user_difficulty_in=user_difficulty_in,
-            match_states=match_states, genre=genre,
+            rating_min=rating_min, match_states=match_states, genre=genre,
             naming_mode=naming_mode, instrument=instrument,
             playable_from_pitch=playable_from_pitch,
             include_intrinsic=not group,
@@ -4254,6 +4304,11 @@ class MetadataDB:
             "difficulty-desc": (
                 "((SELECT user_difficulty FROM song_user_meta u WHERE u.filename = songs.filename) IS NULL) ASC, "
                 "(SELECT user_difficulty FROM song_user_meta u WHERE u.filename = songs.filename) DESC"
+            ),
+            # Personal star rating, best first; unrated songs last.
+            "rating": (
+                "((SELECT rating FROM song_rating r WHERE r.filename = songs.filename) IS NULL) ASC, "
+                "(SELECT rating FROM song_rating r WHERE r.filename = songs.filename) DESC"
             ),
         }
         if group and sort in ("mastery", "mastery-desc"):
@@ -4397,8 +4452,10 @@ class MetadataDB:
         # that differs from its A–Z bucket for cross-letter aliases; the full
         # sort/rail reindex under aliases is the P5a materialization pass.
         amap = self.alias_map()
+        rtm = self.rating_map(fns)
         for s in songs:
             s["user_difficulty"] = udm.get(s["filename"])
+            s["user_rating"] = rtm.get(s["filename"])
             s["tags"] = tgm.get(s["filename"], [])
             s["unmatched"] = s["filename"] in um
             if amap:
@@ -4562,6 +4619,7 @@ class MetadataDB:
         # difficulty badge silently never renders (song.user_difficulty was
         # always undefined for every row).
         udm = self.user_meta_map([r[0] for r in rows])
+        rtm = self.rating_map([r[0] for r in rows])
         artists = OrderedDict()
         for r in rows:
             artist = r[2] or "Unknown Artist"
@@ -4585,6 +4643,7 @@ class MetadataDB:
                 "has_estd": r[0] in estd,
                 "favorite": r[0] in favs,
                 "user_difficulty": udm.get(r[0]),
+                "user_rating": rtm.get(r[0]),
             })
 
         # Pick most common name variant per artist/album
