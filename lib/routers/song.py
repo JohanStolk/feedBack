@@ -539,6 +539,21 @@ def put_song_overrides(filename: str, data: dict):
     return {"overrides": appstate.meta_db.get_song_overrides(key)}
 
 
+@router.post("/api/songs/difficulty-scores")
+def post_difficulty_scores(data: dict):
+    """Store computed chart difficulty scores (lower = easier) used to order
+    songs within the same 1–5 difficulty rating. Body {"scores": {filename:
+    number | null}}; null removes a song's score. Returns {"updated": N}."""
+    scores = data.get("scores")
+    if not isinstance(scores, dict):
+        return JSONResponse({"error": "scores must be an object {filename: number|null}"}, 400)
+    for fn, v in scores.items():
+        if not fn or (v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))
+                                        or v != v or v in (float("inf"), float("-inf")))):
+            return JSONResponse({"error": f"bad score for {fn!r}"}, 400)
+    return {"updated": appstate.meta_db.set_difficulty_scores(scores)}
+
+
 @router.post("/api/songs/user-meta/batch")
 def batch_song_user_meta(data: dict):
     """Bulk personal-meta edit over a selection — one request instead of N×2
