@@ -1568,6 +1568,10 @@
     // gold fret numbers (~0.66) that stay crisp.
     const NOTE_NAME_HEX = '#c6c6c6';
     const FRET_LABEL_IDLE_HEX = '#9ab8cc';
+    // Bass slap / pop letters above the gem: warm orange vs. pink, distinct
+    // from the string colours' usual blue/yellow/red/green and from each other.
+    const SLAP_HEX = '#ffa64d';
+    const POP_HEX = '#ff6ad5';
 
     /** 3D chord-box rim bars (thin on all chords, including repeats in a sequence). */
     const CHORD_FRAME_RIM_MIN = 0.055;       // × K — floor thickness
@@ -5285,6 +5289,7 @@
         let gPMXLines = null, pMuteXLines = null; // PM X lines combined geometry (8 segs as quads)
         let gFHXLines = null, pFHXLines = null;   // FH X lines combined geometry
         let pNoteFretLabel, pConnectorLine, pDropLine, pTapChevron, pAccentHalo;
+        let pSlapPopLbl;    // "S" (slap) / "P" (pop) above bass gems
         let pTeachMarkLbl;  // teaching marks fg/sd label sprites (§6.2.2)
         let pNoteNameLbl;   // note-name labels above single-note gems (noteNamesVisible)
         let pHaloBar = null, gHaloBar = null; // gradient halo bar geometry — replaces per-shell pChordAccentHalo
@@ -8475,6 +8480,12 @@
             });
             // Teaching marks fg/sd labels (§6.2.2). One pool, two get()s per note
             // (finger + degree); the texture is swapped per draw via material.map.
+            pSlapPopLbl = pool(lblG, () => {
+                const _spl = new T.Sprite(txtMat('S', SLAP_HEX, false, 'noteFret').clone());
+                _spl.material.fog = false;
+                _spl.material.depthTest = false;
+                return _spl;
+            });
             pTeachMarkLbl = pool(lblG, () => {
                 const _tml = new T.Sprite(txtMat('0', '#7fd1ff', false, 'teachMark').clone());
                 _tml.material.fog = false;
@@ -11093,6 +11104,7 @@
             pNoteFretLabel.reset(); pConnectorLine.reset(); pDropLine.reset();
             pTeachMarkLbl.reset();
             pNoteNameLbl.reset();
+            pSlapPopLbl.reset();
             pFretColMarker.reset(); pSusRail.reset(); pSusRailBloom.reset(); pTechPlane.reset();
             // Clear per-frame queues in-place (avoid reallocating the array object).
             _ndLabels.length = 0;
@@ -15245,6 +15257,22 @@
                         chevron.rotation.z = approachRot;
                         chevron.scale.set(chevronScale, chevronScale, 1);
                         chevron.renderOrder = techniqueMarkerRenderOrder;
+                    }
+                }
+                // Slap / pop (bass): a bold "S" / "P" on top of the technique
+                // stack, coloured so the two read apart at a glance. Fades in
+                // like the fret label and is gone once the note is hit.
+                if (n.slp || n.plk) {
+                    const spAlpha = dt >= 0 ? Math.min(1.0, (AHEAD - dt) / 0.35) : 0;
+                    if (spAlpha > 0) {
+                        const spLbl = pSlapPopLbl.get();
+                        _setLabelMap(spLbl, txtMat(n.slp ? 'S' : 'P', n.slp ? SLAP_HEX : POP_HEX, false, 'noteFret'));
+                        const spS = NH * 1.7 * sLbl;
+                        spLbl.scale.set(spS, spS, 1);
+                        spLbl.position.set(x, y + techniqueYNow + spS * 0.55, noteZ + K);
+                        spLbl.renderOrder = techniqueMarkerRenderOrder;
+                        spLbl.material.opacity = spAlpha;
+                        yo = Math.max(yo, y + techniqueYNow + spS * 1.1);
                     }
                 }
                 // Tremolo label ('~~~') removed — trail shape already conveys it visually.
