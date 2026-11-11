@@ -41,6 +41,8 @@
         // Personal difficulty (song_user_meta.user_difficulty, 1-5); unrated
         // songs sort last either way.
         ['difficulty', 'Difficulty (easiest first)'], ['difficulty-desc', 'Difficulty (hardest first)'],
+        // Personal 1-5 star rating (song_rating, how much you like it); unrated last.
+        ['rating', 'Your rating (best first)'],
     ];
     const FORMATS = [['', 'All formats'], ['sloppak', 'Feedpak'], ['loose', 'Folder']];
     const ARRANGEMENTS = ['Lead', 'Rhythm', 'Bass', 'Combo', 'Vocals'];
@@ -62,7 +64,7 @@
         artist: '', album: '',
         grouping: true,     // one card per song (multi-chart grouping); persisted
 
-        filters: { arr_has: [], arr_lacks: [], stem_has: [], stem_lacks: [], lyrics: '', tunings: [], mastery: [], match: [], genre: [], tuningMatch: 'exact' },
+        filters: { arr_has: [], arr_lacks: [], stem_has: [], stem_lacks: [], lyrics: '', tunings: [], mastery: [], match: [], genre: [], rating: '', tuningMatch: 'exact' },
         page: 0, total: 0, loading: false, built: false, accuracy: {}, tuningNames: [], genres: [],
         artistCatalog: [], renderedHash: '',
         scrollBound: false,
@@ -121,7 +123,7 @@
         const f = state.filters;
         return f.arr_has.length + f.arr_lacks.length + f.stem_has.length + f.stem_lacks.length +
             (f.lyrics ? 1 : 0) + (f.tuningMatch === 'playable' ? 1 : f.tunings.length) + (f.mastery ? f.mastery.length : 0) +
-            (f.match ? f.match.length : 0) + (f.genre ? f.genre.length : 0) +
+            (f.match ? f.match.length : 0) + (f.genre ? f.genre.length : 0) + (f.rating ? 1 : 0) +
             (state.artist ? 1 : 0) + (state.album ? 1 : 0);
     }
 
@@ -147,6 +149,7 @@
                 mastery: [...(f.mastery || [])].sort(),
                 match: [...(f.match || [])].sort(),
                 genre: [...(f.genre || [])].sort(),
+                rating: f.rating || '',
             },
         });
     }
@@ -177,7 +180,7 @@
                 arr_has: arr(f.arr_has), arr_lacks: arr(f.arr_lacks),
                 stem_has: arr(f.stem_has), stem_lacks: arr(f.stem_lacks),
                 lyrics: f.lyrics || '', tunings: arr(f.tunings),
-                mastery: [], match: [], genre: [],
+                mastery: [], match: [], genre: [], rating: '',
             };
         }
     }
@@ -292,6 +295,7 @@
         if (f.mastery && f.mastery.length) p.set('mastery', f.mastery.join(','));
         if (f.match && f.match.length) p.set('match', f.match.join(','));
         if (f.genre && f.genre.length) p.set('genre', f.genre.join(','));
+        if (f.rating) p.set('rating_min', f.rating);
         Object.entries(extra || {}).forEach(([k, v]) => p.set(k, v));
         return p;
     }
@@ -755,12 +759,61 @@
     // what it was before P2 (keeps the windowed grid's height math untouched).
     function personalBadges(song) {
         const d = song.user_difficulty;
+        const r = song.user_rating;
         const tags = song.tags || [];
-        if (d == null && !tags.length) return '';
-        let out = '<div class="absolute top-2 right-2 flex gap-1 opacity-100 group-hover:opacity-0 transition pointer-events-none">';
+        if (d == null && r == null && !tags.length) return '';
+        let out = '<div data-personal-badges class="absolute top-2 right-2 flex gap-1 opacity-100 group-hover:opacity-0 transition pointer-events-none">';
+        if (r != null) out += '<span class="bg-black/60 text-fb-gold text-[0.625rem] font-bold px-1.5 py-0.5 rounded" title="Your rating: ' + esc(r) + ' of 5">★' + esc(r) + '</span>';
         if (d != null) out += '<span class="bg-black/60 text-white text-[0.625rem] font-bold px-1.5 py-0.5 rounded" title="Your difficulty: ' + esc(DIFF_LABELS[d] || d) + '">◆' + esc(d) + '</span>';
         if (tags.length) out += '<span class="bg-black/60 text-white text-[0.625rem] font-bold px-1.5 py-0.5 rounded" title="Tags: ' + esc(tags.join(', ')) + '">🏷' + tags.length + '</span>';
         return out + '</div>';
+    }
+
+    // Personal 1-5 star rating (how much you like a song, Rock Band 3 style):
+    // five buttons, filled up to the rating. Clicking the current rating clears it.
+    function starButtons(rating, cls) {
+        let out = '';
+        for (let n = 1; n <= 5; n++) {
+            const on = rating != null && n <= rating;
+            out += '<button type="button" data-star="' + n + '" title="' + n + ' star' + (n > 1 ? 's' : '') + '" aria-label="Rate ' + n + ' of 5" aria-pressed="' + (rating === n ? 'true' : 'false') + '" class="leading-none ' + cls + ' ' + (on ? 'text-fb-gold' : 'text-white') + '">' + (on ? '★' : '☆') + '</button>';
+        }
+        return out;
+    }
+    function cardStars(song) {
+        return '<div data-card-stars class="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex gap-0.5 px-1.5 py-0.5 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 transition whitespace-nowrap">' +
+            starButtons(song.user_rating == null ? null : song.user_rating, 'text-base') + '</div>';
+    }
+    // Save a star click (toggle off when it repeats the current rating) and
+    // repaint every rendered copy of the song: card stars, the ★ chip, Details.
+    async function setSongRating(song, n) {
+        const fn = song.filename;
+        const next = song.user_rating === n ? null : n;
+        try {
+            const r = await fetch('/api/song/' + enc(fn) + '/rating', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rating: next }) });
+            if (!r.ok) return;
+            song.user_rating = (await r.json()).rating;
+        } catch (_) { return; }
+        const model = state.songsById[fn];   // the drawer may hold a copy
+        if (model && model !== song) model.user_rating = song.user_rating;
+        const sel = (window.CSS && CSS.escape) ? CSS.escape(fn) : fn;
+        document.querySelectorAll('[data-fn="' + sel + '"]').forEach((card) => {
+            card.querySelectorAll('[data-card-stars] [data-star]').forEach((b) => paintStar(b, song.user_rating));
+            const old = card.querySelector('[data-personal-badges]');
+            const html = personalBadges(song);
+            if (old) old.outerHTML = html || '';
+            else if (html && card.querySelector('[data-card-stars]')) {   // grid cards only
+                card.querySelector('[data-v3-play]')?.insertAdjacentHTML('beforeend', html);
+            }
+        });
+        document.querySelectorAll('[data-det-stars] [data-star]').forEach((b) => paintStar(b, song.user_rating));
+    }
+    function paintStar(b, rating) {
+        const n = Number(b.getAttribute('data-star'));
+        const on = rating != null && n <= rating;
+        b.textContent = on ? '★' : '☆';
+        b.classList.toggle('text-fb-gold', on);
+        b.classList.toggle('text-white', !on);
+        b.setAttribute('aria-pressed', rating === n ? 'true' : 'false');
     }
 
     // Clickable arrangement chips — one <button data-arr="<index>"> per
@@ -919,7 +972,7 @@
         return '<div class="group relative" data-fn="' + esc(key) + '" data-letter="' + esc(songBucket(song)) + '" data-library-song="' + esc(songId(song)) + '" data-library-provider="' + esc(state.provider) + '">' +
             '<div class="relative aspect-square rounded-lg overflow-hidden bg-fb-card cursor-pointer' + selRing + '" data-v3-play>' +
             '<img src="' + esc(artUrl(shown)) + '" alt="" loading="lazy" decoding="async" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" onerror="this.style.visibility=\'hidden\'">' +
-            tuning + checkbox + accuracyBadge(key) + fmtBadge(shown) + personalBadges(song) + enrichBadge(key, song.unmatched) + overlay +
+            tuning + checkbox + accuracyBadge(key) + fmtBadge(shown) + personalBadges(song) + enrichBadge(key, song.unmatched) + overlay + cardStars(song) +
             '<div class="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition">' +
             inlineBtns +
             '<button data-fav data-fav-idle="text-white" title="Favorite" aria-label="Favorite" aria-pressed="' + (fav ? 'true' : 'false') + '" class="w-7 h-7 rounded-full bg-black/50 hover:bg-black/70 flex items-center justify-center text-sm ' + (fav ? 'text-fb-accent' : 'text-white') + '">' + (fav ? '♥' : '♡') + '</button>' +
@@ -1518,6 +1571,10 @@
                 e.stopPropagation();
                 openArtistPage(song.artist);
             });
+            el.querySelectorAll('[data-card-stars] [data-star]').forEach((b) => b.addEventListener('click', (e) => {
+                e.stopPropagation();   // the stars sit on the play hitbox
+                setSongRating(song, Number(b.getAttribute('data-star')));
+            }));
             el.querySelector('[data-fav]')?.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 const btn = e.currentTarget;
@@ -2954,6 +3011,7 @@
             section('Lyrics', ['', '1', '0'].map((v) => '<button data-lyrics="' + v + '" class="px-2 py-1 rounded-md text-xs border ' + (f.lyrics === v ? 'bg-fb-primary text-white border-fb-primary' : 'bg-gray-800/50 text-fb-textDim border-gray-700') + '">' + (v === '' ? 'Any' : v === '1' ? 'Has lyrics' : 'No lyrics') + '</button>').join('')) +
             // Progress (mastery bands) — multi-select; server filters via song_stats.
             section('Progress', [['mastered', 'Mastered'], ['in_progress', 'In progress'], ['not_started', 'Not started']].map((it) => '<button data-mastery="' + it[0] + '" class="px-2 py-1 rounded-md text-xs border ' + (f.mastery.includes(it[0]) ? 'bg-fb-primary text-white border-fb-primary' : 'bg-gray-800/50 text-fb-textDim border-gray-700') + '">' + it[1] + '</button>').join('')) +
+            section('Your rating', [['', 'Any'], ['3', '★3+'], ['4', '★4+'], ['5', '★5']].map((it) => '<button data-rating-min="' + it[0] + '" class="px-2 py-1 rounded-md text-xs border ' + ((f.rating || '') === it[0] ? 'bg-fb-primary text-white border-fb-primary' : 'bg-gray-800/50 text-fb-textDim border-gray-700') + '">' + it[1] + '</button>').join('')) +
             // Match (P8) — the song's metadata-match lifecycle state, a triage
             // facet for the enrichment layer. Session-only, like Progress.
             section('Match', [['review', 'To review'], ['matched', 'Matched'], ['unmatched', 'Unmatched'], ['pending', 'Not scanned']].map((it) => '<button data-match="' + it[0] + '" class="px-2 py-1 rounded-md text-xs border ' + (f.match.includes(it[0]) ? 'bg-fb-primary text-white border-fb-primary' : 'bg-gray-800/50 text-fb-textDim border-gray-700') + '">' + it[1] + '</button>').join('')) +
@@ -3051,6 +3109,7 @@
         });
         d.querySelectorAll('[data-lyrics]').forEach((b) => b.addEventListener('click', () => { f.lyrics = b.getAttribute('data-lyrics'); renderDrawer(); }));
         d.querySelectorAll('[data-mastery]').forEach((b) => b.addEventListener('click', () => { const v = b.getAttribute('data-mastery'); const i = f.mastery.indexOf(v); if (i >= 0) f.mastery.splice(i, 1); else f.mastery.push(v); renderDrawer(); }));
+        d.querySelectorAll('[data-rating-min]').forEach((b) => b.addEventListener('click', () => { f.rating = b.getAttribute('data-rating-min'); renderDrawer(); }));
         d.querySelector('[data-grouping]')?.addEventListener('click', () => {
             state.grouping = !(state.grouping !== false);
             renderDrawer();
@@ -3062,7 +3121,7 @@
         d.querySelector('[data-drawer-tidy]')?.addEventListener('click', openArtistTidyUp);
         d.querySelector('[data-drawer-close]')?.addEventListener('click', closeDrawer);
         d.querySelector('[data-drawer-clear]')?.addEventListener('click', async () => {
-            state.filters = { arr_has: [], arr_lacks: [], stem_has: [], stem_lacks: [], lyrics: '', tunings: [], mastery: [], match: [], genre: [], tuningMatch: 'exact' };
+            state.filters = { arr_has: [], arr_lacks: [], stem_has: [], stem_lacks: [], lyrics: '', tunings: [], mastery: [], match: [], genre: [], rating: '', tuningMatch: 'exact' };
             state.artist = '';
             state.album = '';
             renderDrawer();
@@ -3252,6 +3311,8 @@
 
             // Personal practice layer — local, never shared
             '<div class="space-y-3 pt-1"><div class="text-xs font-semibold uppercase tracking-wider text-fb-textDim">Your practice <span class="normal-case font-normal text-fb-textDim/70">· stays on this device</span></div>' +
+            '<div><div class="text-xs text-fb-textDim mb-1">Your rating <span class="text-fb-textDim/70">· how much you like it (click again to clear)</span></div>' +
+            '<div data-det-stars class="flex gap-1 items-center">' + starButtons(song.user_rating == null ? null : song.user_rating, 'text-lg') + '</div></div>' +
             '<div><div class="flex items-center justify-between mb-1"><label class="text-xs text-fb-textDim">Difficulty (for you)</label>' +
             '<button data-diff-clear class="text-[0.6875rem] text-fb-textDim hover:text-fb-text ' + (st.diff == null ? 'invisible' : '') + '">Clear</button></div>' +
             '<div class="flex gap-1 items-center">' + diffBtns + '<span class="text-xs text-fb-textDim ml-2">' + esc(st.diff ? DIFF_LABELS[st.diff] : 'Not set') + '</span></div></div>' +
@@ -3271,6 +3332,10 @@
 
     function wireDetails(drawer, song, st, vocab, render) {
         const $ = (s) => drawer.querySelector(s);
+        // Stars save instantly (like the heart), not on Save.
+        drawer.querySelectorAll('[data-det-stars] [data-star]').forEach((b) => b.addEventListener('click', () => {
+            setSongRating(song, Number(b.getAttribute('data-star')));
+        }));
         drawer.querySelectorAll('[data-det-close]').forEach((b) => b.addEventListener('click', closeDetails));
         // Catalog inputs update state without a re-render (keep caret / focus).
         const bindInput = (id, key) => { const el = $('#' + id); if (el) el.addEventListener('input', () => { st[key] = el.value; }); };
