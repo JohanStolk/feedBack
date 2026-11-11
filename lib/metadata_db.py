@@ -587,6 +587,17 @@ class MetadataDB:
                 updated_at TEXT
             )
         """)
+        # Computed chart difficulty per song (a float, lower = easier), sent by an
+        # external scorer (the workspace songlist.py). Only a tie-break inside
+        # the 1–5 user-difficulty sort, so 500 songs rated "1" still come out
+        # easiest first instead of A–Z. Local build; additive + idempotent.
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS song_difficulty_score (
+                filename TEXT PRIMARY KEY,
+                score REAL NOT NULL,
+                updated_at TEXT
+            )
+        """)
         # Free-form personal practice tags ("warm-ups", "riffs to nail") — an
         # intent practice-set primitive (Play-all-over-a-tag comes later). Tags
         # are normalized lowercase on write so "Rock"/"rock" don't split. Peer
@@ -1174,6 +1185,24 @@ class MetadataDB:
                 f"SELECT filename, rating FROM song_rating WHERE filename IN ({ph})",
                 chunk).fetchall())
         return out
+    # ── Computed difficulty score (tie-break for the difficulty sort) ─────────
+    def set_difficulty_scores(self, scores: dict) -> int:
+        """Upsert {filename: score}; a None score removes the song's row."""
+        n = 0
+        with self._lock:
+            for fn, sc in scores.items():
+                fn = self._canonical_song_filename(fn)
+                if sc is None:
+                    self.conn.execute("DELETE FROM song_difficulty_score WHERE filename = ?", (fn,))
+                else:
+                    self.conn.execute(
+                        "INSERT INTO song_difficulty_score (filename, score, updated_at) "
+                        "VALUES (?, ?, datetime('now')) ON CONFLICT(filename) DO UPDATE SET "
+                        "score = excluded.score, updated_at = excluded.updated_at",
+                        (fn, float(sc)))
+                n += 1
+            self.conn.commit()
+        return n
 
     # ── Per-field metadata overrides + locks (Fix-metadata popup) ─────────────
     def get_song_overrides(self, filename: str) -> dict:
@@ -1396,6 +1425,7 @@ class MetadataDB:
         INSIDE the caller's `meta_db._lock` — must not re-acquire the lock."""
         self.conn.execute("DELETE FROM song_user_meta WHERE filename = ?", (filename,))
         self.conn.execute("DELETE FROM song_rating WHERE filename = ?", (filename,))
+        self.conn.execute("DELETE FROM song_difficulty_score WHERE filename = ?", (filename,))
         self.conn.execute("DELETE FROM song_tags WHERE filename = ?", (filename,))
         self.conn.execute("DELETE FROM song_field_override WHERE filename = ?", (filename,))
 
@@ -4313,13 +4343,19 @@ class MetadataDB:
             # manually set or seeded by the difficulty_tagger plugin), via a
             # correlated subquery like mastery above (drops to OFFSET paging).
             # Unrated songs push to the bottom in both directions.
+            # Within one rating, the computed score (song_difficulty_score)
+            # breaks the tie; songs without a score follow, then A–Z as before.
             "difficulty": (
                 "((SELECT user_difficulty FROM song_user_meta u WHERE u.filename = songs.filename) IS NULL) ASC, "
-                "(SELECT user_difficulty FROM song_user_meta u WHERE u.filename = songs.filename) ASC"
+                "(SELECT user_difficulty FROM song_user_meta u WHERE u.filename = songs.filename) ASC, "
+                "((SELECT score FROM song_difficulty_score d WHERE d.filename = songs.filename) IS NULL) ASC, "
+                "(SELECT score FROM song_difficulty_score d WHERE d.filename = songs.filename) ASC"
             ),
             "difficulty-desc": (
                 "((SELECT user_difficulty FROM song_user_meta u WHERE u.filename = songs.filename) IS NULL) ASC, "
-                "(SELECT user_difficulty FROM song_user_meta u WHERE u.filename = songs.filename) DESC"
+                "(SELECT user_difficulty FROM song_user_meta u WHERE u.filename = songs.filename) DESC, "
+                "((SELECT score FROM song_difficulty_score d WHERE d.filename = songs.filename) IS NULL) ASC, "
+                "(SELECT score FROM song_difficulty_score d WHERE d.filename = songs.filename) DESC"
             ),
             # Personal star rating, best first; unrated songs last.
             "rating": (
