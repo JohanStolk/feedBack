@@ -363,6 +363,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Bass part, shown as Alt. Bass when the song has another Bass chart and as Bass
   when it is the only one. Songs already in the library pick this up on the next
   Refresh (a one-time rescan of just those songs).
+- **The pinned default arrangement now sticks in smart naming mode.** The ☆ pin next to
+  the arrangement picker saves the arrangement's own name ("Bass 2"), but in smart mode
+  opening a song compared it with the smart name ("Alt. Bass"), so the pin never matched
+  and every song opened on the main part. Either name now matches.
 - **Count-in follows the song's meter and its pickup measure.** The count-in
   (loop wrap, section practice, and the "Countdown before song" setting) always
   clicked exactly four beats, so a 3/4 song was counted in 4/4, and a song
