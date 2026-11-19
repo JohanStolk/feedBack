@@ -15045,7 +15045,7 @@
                     if (spAlpha > 0) {
                         const spLbl = pSlapPopLbl.get();
                         _setLabelMap(spLbl, txtMat(n.slp ? 'S' : 'P', SLAP_POP_HEX, false, 'noteFret'));
-                        const spS = NH * 2.0;
+                        const spS = NH * 1.5;
                         spLbl.scale.set(spS, spS, 1);
                         spLbl.position.set(x, y + techniqueYNow, noteZ + 1.2 * K);
                         spLbl.renderOrder = techniqueMarkerRenderOrder + 1;
