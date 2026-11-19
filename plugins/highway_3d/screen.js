@@ -1568,10 +1568,10 @@
     // gold fret numbers (~0.66) that stay crisp.
     const NOTE_NAME_HEX = '#c6c6c6';
     const FRET_LABEL_IDLE_HEX = '#9ab8cc';
-    // Bass slap / pop letters drawn on the gem face. White with the note-fret
-    // style's dark outline reads on every string colour (an orange S on an
-    // orange gem would vanish); the letter itself tells S from P.
-    const SLAP_POP_HEX = '#ffffff';
+    // Bass slap / pop letters above the gem: warm orange vs. pink, distinct
+    // from the string colours' usual blue/yellow/red/green and from each other.
+    const SLAP_HEX = '#ffa64d';
+    const POP_HEX = '#ff6ad5';
 
     /** 3D chord-box rim bars (thin on all chords, including repeats in a sequence). */
     const CHORD_FRAME_RIM_MIN = 0.055;       // × K — floor thickness
@@ -8481,7 +8481,7 @@
             // Teaching marks fg/sd labels (§6.2.2). One pool, two get()s per note
             // (finger + degree); the texture is swapped per draw via material.map.
             pSlapPopLbl = pool(lblG, () => {
-                const _spl = new T.Sprite(txtMat('S', SLAP_POP_HEX, false, 'noteFret').clone());
+                const _spl = new T.Sprite(txtMat('S', SLAP_HEX, false, 'noteFret').clone());
                 _spl.material.fog = false;
                 _spl.material.depthTest = false;
                 return _spl;
@@ -15259,20 +15259,20 @@
                         chevron.renderOrder = techniqueMarkerRenderOrder;
                     }
                 }
-                // Slap / pop (bass): a bold "S" / "P" on the gem face, sized and
-                // placed like the palm-mute / harmonic overlays, so it adds no
-                // height to the technique stack. Fades in like the fret label
-                // and is gone once the note is hit.
+                // Slap / pop (bass): a bold "S" / "P" on top of the technique
+                // stack, coloured so the two read apart at a glance. Fades in
+                // like the fret label and is gone once the note is hit.
                 if (n.slp || n.plk) {
                     const spAlpha = dt >= 0 ? Math.min(1.0, (AHEAD - dt) / 0.35) : 0;
                     if (spAlpha > 0) {
                         const spLbl = pSlapPopLbl.get();
-                        _setLabelMap(spLbl, txtMat(n.slp ? 'S' : 'P', SLAP_POP_HEX, false, 'noteFret'));
-                        const spS = NH * 2.0;
+                        _setLabelMap(spLbl, txtMat(n.slp ? 'S' : 'P', n.slp ? SLAP_HEX : POP_HEX, false, 'noteFret'));
+                        const spS = NH * 1.7 * sLbl;
                         spLbl.scale.set(spS, spS, 1);
-                        spLbl.position.set(x, y + techniqueYNow, noteZ + 1.2 * K);
-                        spLbl.renderOrder = techniqueMarkerRenderOrder + 1;
+                        spLbl.position.set(x, y + techniqueYNow + spS * 0.55, noteZ + K);
+                        spLbl.renderOrder = techniqueMarkerRenderOrder;
                         spLbl.material.opacity = spAlpha;
+                        yo = Math.max(yo, y + techniqueYNow + spS * 1.1);
                     }
                 }
                 // Tremolo label ('~~~') removed — trail shape already conveys it visually.
