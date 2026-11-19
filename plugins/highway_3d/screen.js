@@ -15059,7 +15059,10 @@
                         spLbl.position.set(x, y + techniqueYNow + spS * 0.55, noteZ + K);
                         spLbl.renderOrder = techniqueMarkerRenderOrder;
                         spLbl.material.opacity = spAlpha;
-                        yo = Math.max(yo, y + techniqueYNow + spS * 1.1);
+                        // Reserve only the glyph's own height (the sprite canvas has
+                        // padding): a taller stack leans sideways in the side-on
+                        // camera, so a note name above would drift off-centre.
+                        yo = Math.max(yo, y + techniqueYNow + spS * 0.75);
                     }
                 }
                 // Tremolo label ('~~~') removed — trail shape already conveys it visually.
