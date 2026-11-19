@@ -367,6 +367,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the arrangement picker saves the arrangement's own name ("Bass 2"), but in smart mode
   opening a song compared it with the smart name ("Alt. Bass"), so the pin never matched
   and every song opened on the main part. Either name now matches.
+- **Home reopens your instrument's part.** Continue Playing and Jump back in
+  no longer reopen a guitar part for a bass player (or the reverse) just
+  because it was opened last; they follow Settings' instrument and the
+  default-part pin. Jump back in shows each song once.
 - **Count-in follows the song's meter and its pickup measure.** The count-in
   (loop wrap, section practice, and the "Countdown before song" setting) always
   clicked exactly four beats, so a 3/4 song was counted in 4/4, and a song
