@@ -1568,10 +1568,10 @@
     // gold fret numbers (~0.66) that stay crisp.
     const NOTE_NAME_HEX = '#c6c6c6';
     const FRET_LABEL_IDLE_HEX = '#9ab8cc';
-    // Bass slap / pop letters above the gem: warm orange vs. pink, distinct
-    // from the string colours' usual blue/yellow/red/green and from each other.
-    const SLAP_HEX = '#ffa64d';
-    const POP_HEX = '#ff6ad5';
+    // Bass slap / pop letters above the gem: black with a white outline (the
+    // 'slapPop' text style), unlike any gem or string colour, so they read as a
+    // marking rather than part of the note; the letter tells S from P.
+    const SLAP_POP_HEX = '#000000';
 
     /** 3D chord-box rim bars (thin on all chords, including repeats in a sequence). */
     const CHORD_FRAME_RIM_MIN = 0.055;       // × K — floor thickness
@@ -5688,6 +5688,14 @@
                 srcH: 256, stroke: '#0a1018', strokeW: 18,
                 shadow: { color: 'rgba(0,0,0,0.7)', blur: 14, dx: 0, dy: 0 },
             },
+            // Bass slap / pop letters: noteFret's glyphs, inverted (black fill,
+            // white outline) so they stand apart from the white fret numbers.
+            slapPop: {
+                font:     '900 160px "Arial Black", "Helvetica Neue", Arial, sans-serif',
+                wideFont: '900 128px "Arial Black", "Helvetica Neue", Arial, sans-serif',
+                srcH: 256, stroke: '#ffffff', strokeW: 24,
+                shadow: { color: 'rgba(0,0,0,0.6)', blur: 10, dx: 0, dy: 0 },
+            },
             // Ghost-fret labels on the board projection: same weight/size/outline
             // as noteFret, but uses textAlign='center'; textBaseline='middle'
             // (the standard branch in txtMat) so the glyph is truly centred on
@@ -8481,7 +8489,7 @@
             // Teaching marks fg/sd labels (§6.2.2). One pool, two get()s per note
             // (finger + degree); the texture is swapped per draw via material.map.
             pSlapPopLbl = pool(lblG, () => {
-                const _spl = new T.Sprite(txtMat('S', SLAP_HEX, false, 'noteFret').clone());
+                const _spl = new T.Sprite(txtMat('S', SLAP_POP_HEX, false, 'slapPop').clone());
                 _spl.material.fog = false;
                 _spl.material.depthTest = false;
                 return _spl;
@@ -15260,13 +15268,13 @@
                     }
                 }
                 // Slap / pop (bass): a bold "S" / "P" on top of the technique
-                // stack, coloured so the two read apart at a glance. Fades in
+                // stack, black with a white outline. Fades in
                 // like the fret label and is gone once the note is hit.
                 if (n.slp || n.plk) {
                     const spAlpha = dt >= 0 ? Math.min(1.0, (AHEAD - dt) / 0.35) : 0;
                     if (spAlpha > 0) {
                         const spLbl = pSlapPopLbl.get();
-                        _setLabelMap(spLbl, txtMat(n.slp ? 'S' : 'P', n.slp ? SLAP_HEX : POP_HEX, false, 'noteFret'));
+                        _setLabelMap(spLbl, txtMat(n.slp ? 'S' : 'P', SLAP_POP_HEX, false, 'slapPop'));
                         const spS = NH * 1.7 * sLbl;
                         spLbl.scale.set(spS, spS, 1);
                         spLbl.position.set(x, y + techniqueYNow + spS * 0.55, noteZ + K);
