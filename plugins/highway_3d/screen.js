@@ -5689,12 +5689,14 @@
                 shadow: { color: 'rgba(0,0,0,0.7)', blur: 14, dx: 0, dy: 0 },
             },
             // Bass slap / pop letters: noteFret's glyphs, inverted (black fill,
-            // white outline) so they stand apart from the white fret numbers.
+            // light outline) so they stand apart from the white fret numbers. The
+            // outline is the note-name grey (#c6c6c6), below the bloom threshold,
+            // and there is no shadow, so the letters don't glow.
             slapPop: {
                 font:     '900 160px "Arial Black", "Helvetica Neue", Arial, sans-serif',
                 wideFont: '900 128px "Arial Black", "Helvetica Neue", Arial, sans-serif',
-                srcH: 256, stroke: '#ffffff', strokeW: 24,
-                shadow: { color: 'rgba(0,0,0,0.6)', blur: 10, dx: 0, dy: 0 },
+                srcH: 256, stroke: '#c6c6c6', strokeW: 24,
+                shadow: null,
             },
             // Ghost-fret labels on the board projection: same weight/size/outline
             // as noteFret, but uses textAlign='center'; textBaseline='middle'
