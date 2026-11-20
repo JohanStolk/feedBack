@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Finer seeking and a part switch on the keyboard.** In the player, Shift + ← / →
+  seeks 1 s and Alt/Option + ← / → 0.25 s (plain arrows still 5 s), to step
+  through a fast passage. ↑ / ↓ switch to the previous / next part of the same
+  instrument (Bass ↔ Alt. Bass, Lead ↔ Rhythm), keeping the position. The speed
+  presets gain 25 % (the slider already went down to 15 %).
 - **Core reader for source rigs (feedpak 1.18.0).** A pack can declare what a
   MIDI part should sound like by binding a rig; core now reads that binding and
   hands it to the client instead of dropping it. Three parts: the

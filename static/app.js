@@ -60,7 +60,9 @@ import {
     _countdownBeforeSongEnabled,
     _curPlaybackSpeed,
     _exitConfirmEnabled,
+    _nextPartIndex,
     _resetPlaybackSpeedForNewSong,
+    _seekStep,
     _showUpNextEnabled,
     _wireSpeedPresetsOnce,
     applySpeedPreset,
@@ -1961,18 +1963,50 @@ registerShortcut({
     handler: () => togglePlay()
 });
 
+// Seek: 5 s, Shift 1 s, Alt/Option 0.25 s. Ctrl/Cmd + arrows stay free for the
+// OS and browser.
+const _SEEK_MODS = { ctrl: false, meta: false };
 registerShortcut({
     key: 'ArrowLeft',
-    description: 'Seek back 5 seconds',
+    description: 'Seek back 5 s (Shift: 1 s, Alt: 0.25 s)',
     scope: 'player',
-    handler: () => seekBy(-5)
+    modifiers: _SEEK_MODS,
+    handler: (e) => seekBy(-_seekStep(e))
 });
 
 registerShortcut({
     key: 'ArrowRight',
-    description: 'Seek forward 5 seconds',
+    description: 'Seek forward 5 s (Shift: 1 s, Alt: 0.25 s)',
     scope: 'player',
-    handler: () => seekBy(5)
+    modifiers: _SEEK_MODS,
+    handler: (e) => seekBy(_seekStep(e))
+});
+
+// Part switch: ↑ / ↓ go to the next / previous part of the same instrument
+// (Bass ↔ Alt. Bass, Lead ↔ Rhythm ↔ Combo), keeping the position. Reads the
+// arrangement switcher, so the order and names are what the player shows.
+function _switchPart(dir) {
+    const sel = document.getElementById('arr-select');
+    if (!sel || !sel.options.length) return;
+    const parts = Array.from(sel.options, (o) => ({ index: Number(o.value), name: o.textContent }));
+    const next = _nextPartIndex(parts, Number(sel.value), dir);
+    if (next == null) return;
+    sel.value = String(next);
+    changeArrangement(next);
+}
+registerShortcut({
+    key: 'ArrowUp',
+    description: 'Previous part of the same instrument (e.g. Bass ↔ Alt. Bass)',
+    scope: 'player',
+    modifiers: { ctrl: false, alt: false, meta: false, shift: false },
+    handler: () => _switchPart(-1)
+});
+registerShortcut({
+    key: 'ArrowDown',
+    description: 'Next part of the same instrument (e.g. Bass ↔ Alt. Bass)',
+    scope: 'player',
+    modifiers: { ctrl: false, alt: false, meta: false, shift: false },
+    handler: () => _switchPart(1)
 });
 
 registerShortcut({

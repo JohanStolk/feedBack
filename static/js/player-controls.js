@@ -59,7 +59,7 @@ export function _exitConfirmEnabled() {
     try { return localStorage.getItem('confirmExitSong') === '1'; } catch (_) { return false; }
 }
 
-const SPEED_PRESET_PCTS = [100, 90, 80, 75, 70, 60, 50];
+const SPEED_PRESET_PCTS = [100, 90, 80, 75, 70, 60, 50, 25];
 const SPEED_SNAP_THRESHOLD = 0.02;
 let _speedPresetsWired = false;
 
@@ -226,4 +226,39 @@ export function _applyMasteryAvailability(hasPhraseData) {
         slider.disabled = true;
         slider.title = 'Source chart has a single difficulty level — slider disabled';
     }
+}
+
+// Seek step for ← / →: 5 s, Shift 1 s, Alt/Option 0.25 s (fine steps for checking a
+// chart, best at a low speed).
+export function _seekStep(e) {
+    if (e && e.shiftKey) return 1;
+    if (e && e.altKey) return 0.25;
+    return 5;
+}
+
+// Instrument family of an arrangement from its (smart or raw) name, for the
+// ↑ / ↓ part switch: Bass, Alt. Bass and Bass 2 are one family, Lead/Rhythm/
+// Combo another.
+export function _partFamily(name) {
+    const n = String(name || '').toLowerCase();
+    if (n.includes('bass')) return 'bass';
+    if (n.includes('vocal')) return 'vocals';
+    if (n.includes('drum')) return 'drums';
+    if (n.includes('key') || n.includes('piano') || n.includes('synth')) return 'keys';
+    return 'guitar';
+}
+
+// The next arrangement of the same family as `current`, in list order (the
+// switcher's order), wrapping around. `parts` is [{ index, name }]. Returns the
+// index to switch to, or null when the current part has no sibling.
+export function _nextPartIndex(parts, current, dir) {
+    if (!Array.isArray(parts)) return null;
+    const cur = parts.find((p) => p && p.index === current);
+    if (!cur) return null;
+    const fam = _partFamily(cur.name);
+    const same = parts.filter((p) => p && _partFamily(p.name) === fam);
+    if (same.length < 2) return null;
+    const at = same.indexOf(cur);
+    const step = dir < 0 ? -1 : 1;
+    return same[(at + step + same.length) % same.length].index;
 }
