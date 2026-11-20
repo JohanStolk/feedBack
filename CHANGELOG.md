@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through a fast passage. ↑ / ↓ switch to the previous / next part of the same
   instrument (Bass ↔ Alt. Bass, Lead ↔ Rhythm), keeping the position. The speed
   presets gain 25 % (the slider already went down to 15 %).
+- **Hundredths in the player's time while checking.** Paused or below full speed,
+  the position shows as m:ss.cc (0:22.58), so you can tell exactly where a note
+  falls; at full speed it stays m:ss.
 - **Core reader for source rigs (feedpak 1.18.0).** A pack can declare what a
   MIDI part should sound like by binding a rig; core now reads that binding and
   hands it to the client instead of dropping it. Three parts: the

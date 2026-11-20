@@ -130,7 +130,7 @@ import {
     toggleSectionPracticePopover,
 } from './js/section-practice.js';
 import { configureHost } from './js/host.js';
-import { formatTime } from './js/format.js';
+import { formatTime, formatTimePrecise } from './js/format.js';
 import { L } from './js/library-state.js';
 import {
     _LIB_FORMAT_KEY,
@@ -1839,7 +1839,10 @@ setInterval(() => {
             ct = S.lastAudioTime;
         }
         S.lastAudioTime = ct;
-        const hudText = `${formatTime(ct)} / ${formatTime(dur)}`;
+        // Hundredths while paused or slowed down (checking a passage); whole seconds
+        // at full speed so the display doesn't flicker while playing.
+        const precise = !S.isPlaying || _curPlaybackSpeed() < 0.999;
+        const hudText = `${precise ? formatTimePrecise(ct) : formatTime(ct)} / ${formatTime(dur)}`;
         if (hudText !== _hudTimeLast) {
             if (!_hudTimeEl || !_hudTimeEl.isConnected) _hudTimeEl = document.getElementById('hud-time');
             if (_hudTimeEl) _hudTimeEl.textContent = hudText;
