@@ -540,7 +540,8 @@ window.registerShortcut({
 |-----|-------------|
 | `?` | Show keyboard shortcuts panel (global) |
 | `Space` | Play/Pause (player only) |
-| `←` / `→` | Seek ±5 seconds (player only) |
+| `←` / `→` | Seek ±5 seconds; Shift ±1 s, Alt ±0.25 s (player only) |
+| `↑` / `↓` | Previous / next part of the same instrument, e.g. Bass ↔ Alt. Bass (player only) |
 | `Escape` | Back to library (player only) |
 | `[` / `]` | Audio offset ±10ms (Shift: ±50ms) (player only) |
 
