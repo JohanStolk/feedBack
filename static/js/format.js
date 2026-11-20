@@ -15,3 +15,12 @@
 
 /** Seconds -> `M:SS`. */
 export function formatTime(s) { return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`; }
+
+// m:ss.cc (hundredths), for the player's position while paused or slowed down, when
+// you're checking where exactly a note falls. Rounded down so it never runs ahead of
+// the m:ss display.
+export function formatTimePrecise(s) {
+    const cs = Math.floor(Math.max(0, s) * 100);
+    const sec = Math.floor(cs / 100);
+    return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}.${String(cs % 100).padStart(2, '0')}`;
+}
